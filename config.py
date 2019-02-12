@@ -1,4 +1,5 @@
 from attrdict import AttrDict
+import torch
 from model.utils import openai_transformer_config
 
 
@@ -40,10 +41,12 @@ def get_trainer_config():
                        'clip_grad': None,
                        'test_period': 1,
                        'seed': 0,
-                       'device': 'cpu',
+                       'device': 'cuda',
                        'load_last': True, 
                        'openai_parameters_dir': './parameters',
                        'last_checkpoint_path': './checkpoints/last_checkpoint',
+                       'eval_references_file': './evaluation_files/eval_references_file.txt',
+                       'eval_predictions_file': './evaluation_files/eval_predictions_file.txt',
                        'interrupt_checkpoint_path': './checkpoints/interrupt_checkpoint',
                        'train_datasets': ['./datasets/ConvAI2/train_self_revised_no_cands.txt',
                                           './datasets/ConvAI2/train_self_original_no_cands.txt',
@@ -54,5 +57,32 @@ def get_trainer_config():
                                          './datasets/DailyDialog/valid_dailydialog.txt'],
                        'test_datasets_cache': './datasets/test_datasets_cache.bin'})
 
-    return config
+    local_config = AttrDict({'n_epochs': 100,
+                       'batch_size': 1,
+                       'batch_split': 1,
+                       'lr': 6.25e-5,
+                       'lr_warmup': 16000,
+                       'lm_weight': 0.5,
+                       'risk_weight': 0,
+                       'n_jobs': 0,
+                       'label_smoothing': 0.1,
+                       'clip_grad': None,
+                       'test_period': 1,
+                       'seed': 0,
+                       'device': 'cpu',
+                       'load_last': True, 
+                       'openai_parameters_dir': './parameters',
+                       'last_checkpoint_path': './checkpoints/last_checkpoint',
+                       'eval_references_file': './evaluation_files/eval_references_file.txt',
+                       'eval_predictions_file': './evaluation_files/eval_predictions_file.txt',
+                       'interrupt_checkpoint_path': './checkpoints/interrupt_checkpoint',
+                       'train_datasets': ['./datasets/ConvAI2/train_self_revised_no_cands.txt',
+                                          './datasets/ConvAI2/train_self_original_no_cands.txt',
+                                          './datasets/DailyDialog/train_dailydialog.txt'],
+                       'train_datasets_cache': './datasets/train_datasets_cache.bin',
+                       'test_datasets': ['./datasets/ConvAI2/valid_self_revised_no_cands.txt',
+                                         './datasets/ConvAI2/valid_self_original_no_cands.txt',
+                                         './datasets/DailyDialog/valid_dailydialog.txt'],
+                       'test_datasets_cache': './datasets/test_datasets_cache.bin'})
 
+    return config if torch.cuda.is_available() else local_config

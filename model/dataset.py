@@ -69,7 +69,7 @@ class FacebookDataset(Dataset):
         return dataset
 
     def __init__(self, paths, vocab, max_lengths=2048, min_infos=2, cache=None):
-        assert min_infos > 0             
+        assert min_infos > 0
 
         if isinstance(paths, str):
             paths = [paths]

@@ -179,5 +179,5 @@ class BPEVocab:
 
     def ids2string(self, ids):
         bpe_tokens = [self.id2token[id] for id in ids]
-    
+
         return ''.join(bpe_tokens).replace(BPEVocab.we, ' ')

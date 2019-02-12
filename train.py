@@ -1,12 +1,13 @@
 import torch
 import random
 import logging
-from model.utils import load_openai_weights, set_seed, f1_score
+from model.utils import load_openai_weights, set_seed, f1_score, open, unicode
 from model.transformer_model import TransformerModel
 from model.trainer import Trainer
 from model.text import BPEVocab
 from model.dataset import FacebookDataset
 from config import get_model_config, get_trainer_config
+from metrics.metrics import nlp_metrics
 
 logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt = '%m/%d/%Y %H:%M:%S',
@@ -54,8 +55,8 @@ def main():
     test_dataset = FacebookDataset(trainer_config.test_datasets, vocab, transformer.n_pos_embeddings - 1, cache=trainer_config.test_datasets_cache)
 
     model_trainer = Trainer(transformer,
-                            train_dataset, 
-                            test_dataset, 
+                            train_dataset,
+                            test_dataset,
                             batch_size=trainer_config.batch_size,
                             batch_split=trainer_config.batch_split, 
                             lr=trainer_config.lr, 
@@ -74,8 +75,18 @@ def main():
 
 
     # helpers -----------------------------------------------------
+    def external_metrics_func(full_references, full_predictions):
+        with open(trainer_config.eval_references_file, 'w', encoding='utf-8') as f:
+            f.write(unicode('\n'.join(full_references)))
+        with open(trainer_config.eval_predictions_file, 'w', encoding='utf-8') as f:
+            f.write(unicode('\n'.join(full_predictions)))
+
+        nist, bleu, meteor, entropy, div, avg_len = nlp_metrics([trainer_config.eval_references_file],
+                                                                trainer_config.eval_predictions_file)
+        return {'nist': nist, 'bleu': bleu, 'meteor': meteor, 'entropy': entropy, 'div': div, 'avg_len': avg_len}
+
     def save_func(epoch):
-        torch.save(model_trainer.state_dict(), trainer_config.last_checkpoint_path)  
+        torch.save(model_trainer.state_dict(), trainer_config.last_checkpoint_path)
 
     def sample_text_func(epoch):
         n_samples = 5
@@ -101,14 +112,14 @@ def main():
     def test_func(epoch):
         if (epoch+1) % trainer_config.test_period == 0:
             metric_funcs = {'f1_score': f1_score}
-            model_trainer.test(metric_funcs)
-    
+            model_trainer.test(metric_funcs, external_metrics_func)
+
     def f1_risk(predictions, targets):
         scores = f1_score(predictions, targets, average=False)
-        return [1-s for s in scores] 
+        return [1-s for s in scores]
 
     # helpers -----------------------------------------------------
-    
+
 
     try:
         model_trainer.train(trainer_config.n_epochs, after_epoch_funcs=[save_func, sample_text_func, test_func], risk_func=f1_risk)
