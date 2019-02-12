@@ -40,7 +40,7 @@ def get_trainer_config():
                        'clip_grad': None,
                        'test_period': 1,
                        'seed': 0,
-                       'device': 'cuda',
+                       'device': 'cpu',
                        'load_last': True, 
                        'openai_parameters_dir': './parameters',
                        'last_checkpoint_path': './checkpoints/last_checkpoint',
@@ -48,9 +48,11 @@ def get_trainer_config():
                        'train_datasets': ['./datasets/ConvAI2/train_self_revised_no_cands.txt',
                                           './datasets/ConvAI2/train_self_original_no_cands.txt',
                                           './datasets/DailyDialog/train_dailydialog.txt'],
+                       'train_datasets_cache': './datasets/train_datasets_cache.bin',
                        'test_datasets': ['./datasets/ConvAI2/valid_self_revised_no_cands.txt',
                                          './datasets/ConvAI2/valid_self_original_no_cands.txt',
-                                         './datasets/DailyDialog/valid_dailydialog.txt']})
+                                         './datasets/DailyDialog/valid_dailydialog.txt'],
+                       'test_datasets_cache': './datasets/test_datasets_cache.bin'})
 
     return config
 
