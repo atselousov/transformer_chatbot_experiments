@@ -46,7 +46,7 @@ class Trainer:
         self.lm_weight = lm_weight
         self.risk_weight = risk_weight
         self.clip_grad = clip_grad
-        self.device = device
+        self.device = device 
         self.ignore_idxs = ignore_idxs
 
     def state_dict(self):

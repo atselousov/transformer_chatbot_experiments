@@ -14,6 +14,7 @@
 #  You should have received a copy of the GNU Affero General Public License
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import os
 import random
 import torch
 from torch.utils.data import Dataset
@@ -62,23 +63,28 @@ class FacebookDataset(Dataset):
 
             if len(dialog) % 2 == 1:
                 dialog = dialog[:-1]
-           
+
             dataset.append((persona_info, dialog))
 
         return dataset
 
-    def __init__(self, paths, vocab, max_lengths=2048, min_infos=2):
+    def __init__(self, paths, vocab, max_lengths=2048, min_infos=2, cache=None):
         assert min_infos > 0             
 
         if isinstance(paths, str):
             paths = [paths]
-        
+
         self.vocab = vocab
         self.max_lengths = max_lengths
         self.min_infos = min_infos
 
-        parsed_data = sum([FacebookDataset.parse_data(path) for path in paths], [])
-        self.data = FacebookDataset.make_dataset(parsed_data, vocab, max_lengths)
+        if cache and os.path.exists(cache):
+            self.data = torch.load(cache)
+        else:
+            parsed_data = sum([FacebookDataset.parse_data(path) for path in paths], [])
+            self.data = FacebookDataset.make_dataset(parsed_data, vocab, max_lengths)
+            if cache:
+                torch.save(self.data, cache)
 
     def __len__(self):
         return len(self.data)
