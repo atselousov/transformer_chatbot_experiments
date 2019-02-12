@@ -1,5 +1,6 @@
 import torch
 import random
+import logging
 from model.utils import load_openai_weights, set_seed, f1_score
 from model.transformer_model import TransformerModel
 from model.trainer import Trainer
@@ -7,6 +8,10 @@ from model.text import BPEVocab
 from model.dataset import FacebookDataset
 from config import get_model_config, get_trainer_config
 
+logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
+                    datefmt = '%m/%d/%Y %H:%M:%S',
+                    level = logging.INFO)
+logger = logging.getLogger(__name__)
 
 def main():
     model_config = get_model_config()
@@ -42,10 +47,11 @@ def main():
         load_openai_weights(transformer.transformer_module, 
                             trainer_config.openai_parameters_dir,
                             n_special_tokens=vocab.n_special_tokens)
-        print('OpenAI weights loaded from {}'.format(trainer_config.openai_parameters_dir))
+        logger.info('OpenAI weights loaded from {}'.format(trainer_config.openai_parameters_dir))
 
-    train_dataset = FacebookDataset(trainer_config.train_datasets, vocab, transformer.n_pos_embeddings - 1)
-    test_dataset = FacebookDataset(trainer_config.test_datasets, vocab, transformer.n_pos_embeddings - 1)
+    logger.info('loading datasets')
+    train_dataset = FacebookDataset(trainer_config.train_datasets, vocab, transformer.n_pos_embeddings - 1, cache=trainer_config.train_datasets_cache)
+    test_dataset = FacebookDataset(trainer_config.test_datasets, vocab, transformer.n_pos_embeddings - 1, cache=trainer_config.test_datasets_cache)
 
     model_trainer = Trainer(transformer,
                             train_dataset, 
@@ -64,8 +70,8 @@ def main():
     if trainer_config.load_last:
         state_dict = torch.load(trainer_config.last_checkpoint_path, map_location=device)
         model_trainer.load_state_dict(state_dict)
-        print('Weights loaded from {}'.format(trainer_config.last_checkpoint_path))
-    
+        logger.info('Weights loaded from {}'.format(trainer_config.last_checkpoint_path))
+
 
     # helpers -----------------------------------------------------
     def save_func(epoch):
@@ -113,4 +119,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
