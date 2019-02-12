@@ -4,3 +4,5 @@
 checkpoints/*
 parameters/*
 ParlAI/*
+datasets/*
+.vscode
