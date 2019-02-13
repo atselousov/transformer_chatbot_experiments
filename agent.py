@@ -24,8 +24,6 @@ class TransformerAgent(Agent):
                                 help='Whether the model should parse candidates for ranking.')
         agent_args.add_argument('--sample', type=bool, default=False,
                                 help='Sampling of beam from beam search')
-        agent_args.add_argument('--wild_mode', type=bool, default=False,
-                                help='')
         agent_args.add_argument('--clean_emoji', type=bool, default=True,
                                 help='')
         agent_args.add_argument('--check_grammar', type=bool, default=True,
@@ -133,9 +131,6 @@ class TransformerAgent(Agent):
         for subtext in text.split('\n'):
             subtext = subtext.strip()
             
-            if self.opt['wild_mode'] and len(self.history['info']) == 0 and len(self.history['dialog']) == 0:
-                subtext = 'your persona: ' + subtext
-
             if subtext.startswith('your persona:'):
                 subtext = subtext.replace('your persona:', '').strip()
                 subtext = self._preprocess_text(subtext).strip()

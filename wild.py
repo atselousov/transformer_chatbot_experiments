@@ -7,7 +7,6 @@ def main():
     parser = ParlaiParser(True, True)
     parser.set_defaults(batchsize=10,
                         sample=True,
-                        wild_mode=False,
                         clean_emoji=True,
                         check_grammar=True,
                         max_seq_len=256,
