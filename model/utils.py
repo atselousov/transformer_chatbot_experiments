@@ -16,6 +16,8 @@
 
 import re
 import os
+import sys
+import io
 import json
 import random
 from collections import namedtuple, Counter
@@ -25,6 +27,13 @@ import numpy as np
 from scipy.interpolate import RectBivariateSpline
 from torch.utils.checkpoint import checkpoint
 
+py_version = sys.version.split('.')[0]
+if py_version == '2':
+    open = io.open
+    unicode = unicode
+else:
+    unicode = str
+    open = open
 
 def set_seed(seed):
     torch.manual_seed(seed)
@@ -90,11 +99,11 @@ def f1_score(predictions, targets, average=True):
         f1 = (2 * precision * recall) / (precision + recall)
 
         return f1
-    
+
     scores = [f1_score_items(p, t) for p, t in zip(predictions, targets)]
 
     if average:
-        return sum(scores) / len(scores)    
+        return sum(scores) / len(scores)
 
     return scores
 

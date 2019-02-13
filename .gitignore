@@ -4,3 +4,9 @@
 checkpoints/*
 parameters/*
 ParlAI/*
+datasets/*
+evaluation_files/*
+metrics/3rdparty/*
+.vscode
+temp
+__pycache__
