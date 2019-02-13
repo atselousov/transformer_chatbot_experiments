@@ -20,6 +20,7 @@ RUN pip install -r requirements.txt
 RUN python -c "import nltk; nltk.download('wordnet'); nltk.download('averaged_perceptron_tagger'); nltk.download('vader_lexicon'); nltk.download('perluniprops')"
 RUN git clone https://github.com/facebookresearch/ParlAI.git && cd ParlAI && python setup.py develop
 RUN python -m spacy download en
+RUN cd metrics/3rdparty && wget http://www.cs.cmu.edu/~alavie/METEOR/download/meteor-1.5.tar.gz && tar -xvzf ./meteor-1.5.tar.gz && rm meteor-1.5.tar.gz
 
 EXPOSE 9200
 
