@@ -16,6 +16,8 @@
 
 import spacy
 import ftfy
+from collections import Counter, defaultdict
+from tqdm import trange
 
 class SpacyLowerTokenizer:
     def __init__(self):
@@ -70,7 +72,7 @@ class BPEVocab:
                             BPEVocab.info_bos, BPEVocab.info_eos, BPEVocab.talker1_bos,
                             BPEVocab.talker1_eos, BPEVocab.talker2_bos, BPEVocab.talker2_eos]
         vocab = self.spec_tokens + vocab
-        
+
         self.token2id = {t: i for i, t in enumerate(vocab)}
         self.id2token = {i: t for i, t in enumerate(vocab)}
         self.bpe_ranks = dict(zip(codes, range(len(codes))))
@@ -123,6 +125,22 @@ class BPEVocab:
     @property
     def talker2_eos_id(self):
         return self.token2id[BPEVocab.talker2_eos]
+
+    def get_prefix2words(self, convai_dict, smoothing_freq=5):
+        # map BPE-prefix => dict(full_words beginning with BPE-prefix, associated words_counts)
+        prefix2words = defaultdict(dict)
+        for i in trange(len(convai_dict)):
+            word = convai_dict[i]
+            freq = convai_dict.freq[word] + smoothing_freq
+            prefix = self._bpe(word)[0]
+            prefix2words[prefix].update(dict([(word, freq)]))
+
+        # translate in map of frequency ratios
+        for prefix, words in prefix2words.items():
+            total_counts = sum(words.values())
+            prefix2words[prefix] = dict((word, count/total_counts) for word, count in words.items())
+
+        return prefix2words
 
     def _bpe(self, token):
         if token in self.cache:
