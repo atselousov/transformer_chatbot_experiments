@@ -2,17 +2,11 @@
 # Adapted from the Automatic evaluation script for DSTC7 Task 2
 Original repo: https://github.com/mgalley/DSTC7-End-to-End-Conversation-Modeling
 
-Steps:
-1) Make sure you 'git pull' the latest changes (from October 15, 2018), including changes in ../../data_extraction.
-2) cd to `../../data_extraction` and type make. This will create the multi-reference file used by the metrics (`../../data_extraction/test.refs`).
-3) Install 3rd party software as instructed below (METEOR and mteval-v14c.pl).
-5) Run the following command, where `[SUBMISSION]` is the submission file you want to evaluate: (same format as the one you submitted on Oct 8.)
-```
-python dstc.py -c [SUBMISSION] --refs ../../data_extraction/test.refs
-```
+# To install 3rd party scripts
+Download the following 3rd-party packages and save in folder `3rdparty`:
 
-Important: the results printed by dstc.py might differ slightly from the official results, if part of your test set failed to download.
-
+* [**mteval-v14c.pl**](ftp://jaguar.ncsl.nist.gov/mt/resources/mteval-v14c.pl) to compute [NIST](http://www.mt-archive.info/HLT-2002-Doddington.pdf). You may need to install the following [perl](https://www.perl.org/get.html) modules (e.g. by `cpan install`): XML:Twig, Sort:Naturally and String:Util.
+* [**meteor-1.5**](http://www.cs.cmu.edu/~alavie/METEOR/download/meteor-1.5.tar.gz) to compute [METEOR](http://www.cs.cmu.edu/~alavie/METEOR/index.html). It requires [Java](https://www.java.com/en/download/help/download_options.xml).
 
 
 # What does it do?
@@ -40,10 +34,3 @@ clean_str(s)
 
 # i do n't know :) . how about this ? __url__
 ```
-
-# Requirements
-* Works fine for both Python 2.7 and 3.6
-* Please **downloads** the following 3rd-party packages and save in a new folder `3rdparty`:
-	* [**mteval-v14c.pl**](https://goo.gl/YUFajQ) to compute [NIST](http://www.mt-archive.info/HLT-2002-Doddington.pdf). You may need to install the following [perl](https://www.perl.org/get.html) modules (e.g. by `cpan install`): XML:Twig, Sort:Naturally and String:Util.
-	* [**meteor-1.5**](http://www.cs.cmu.edu/~alavie/METEOR/download/meteor-1.5.tar.gz) to compute [METEOR](http://www.cs.cmu.edu/~alavie/METEOR/index.html). It requires [Java](https://www.java.com/en/download/help/download_options.xml).
-
