@@ -14,16 +14,19 @@
 #  You should have received a copy of the GNU Affero General Public License
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import logging
+import random
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import random
-import logging
-from torch.utils.data import DataLoader, RandomSampler, DistributedSampler
+from torch.utils.data import DataLoader, DistributedSampler, RandomSampler
 from tqdm import tqdm
-from .utils import pad_sequence
-from .optim import Adam, NoamOpt
+
 from .loss import LabelSmoothingLoss
+from .optim import Adam, NoamOpt
+from .utils import pad_sequence
 
 logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt = '%m/%d/%Y %H:%M:%S',
@@ -35,7 +38,7 @@ class Trainer:
                  batch_split=1, lm_weight=0.5, risk_weight=0, lr=6.25e-5, lr_warmup=2000, 
                  n_jobs=0, clip_grad=None, label_smoothing=0, device=torch.device('cuda'),
                  ignore_idxs=[], local_rank=-1, fp16=False, loss_scale=0,
-                 linear_schedule=False, n_epochs=0):
+                 linear_schedule=False, n_epochs=0, negative_samples=0):
         if local_rank != -1:
             torch.cuda.set_device(local_rank)
             device = torch.device("cuda", local_rank)
@@ -106,6 +109,7 @@ class Trainer:
         self.ignore_idxs = ignore_idxs
         self.fp16 = fp16
         self.n_epochs = n_epochs
+        self.negative_samples = negative_samples
 
     def state_dict(self):
         return {'model': self.model.state_dict(),
@@ -129,11 +133,19 @@ class Trainer:
             h = [torch.tensor(d, dtype=torch.long) for d in h]
             h = pad_sequence(h, batch_first=True, padding_value=self.model.padding_idx)
             contexts.append(h)
-    
+
         y = [torch.tensor(d, dtype=torch.long) for d in y]
         y = pad_sequence(y, batch_first=True, padding_value=self.model.padding_idx)
 
-        return contexts, y
+        if self.negative_samples > 0:
+            # sample self.negative_samples as distractors for each instance.
+            # We sample inside the batch (a bit different from Huggingface original implementation)
+            probs = (1 - np.identity(len(y)))/(len(y) - 1)  # don't sample our target as negative sample
+            distractors = list(np.random.choice(y, size=self.negative_samples, replace=False, p=probs[i]) for i in range(len(y)))
+        else:
+            distractors = []
+
+        return contexts, y, distractors
 
     def _eval_train(self, epoch, risk_func=None):
         self.model.train()
@@ -142,7 +154,7 @@ class Trainer:
         loss = 0
         lm_loss = 0
         risk_loss = 0
-        for i, (contexts, targets) in enumerate(tqdm_data):
+        for i, (contexts, targets, distractors) in enumerate(tqdm_data):
             contexts, targets = [c.to(self.device) for c in contexts], targets.to(self.device)
 
             enc_contexts = []
@@ -152,13 +164,17 @@ class Trainer:
             for context in contexts:
                 enc_context = self.model.encode(context.clone())
                 enc_contexts.append(enc_context)
-                
+
                 if self.lm_weight > 0:
                     context_outputs = self.model.generate(enc_context[0])
                     ignore_mask = torch.stack([context == idx for idx in self.ignore_idxs], dim=-1).any(dim=-1)
                     context.masked_fill_(ignore_mask, self.model.padding_idx)
                     prevs, nexts = context_outputs[:, :-1, :].contiguous(), context[:, 1:].contiguous()
                     batch_lm_loss += (self.lm_criterion(prevs.view(-1, prevs.shape[-1]), nexts.view(-1)) / len(contexts))
+
+            # hits@1 loss
+            if self.hits_weight > 0:
+                pass
 
             # s2s loss
             prevs, nexts = targets[:, :-1].contiguous(), targets[:, 1:].contiguous()
