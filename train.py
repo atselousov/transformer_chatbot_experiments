@@ -7,7 +7,7 @@ from model.trainer import Trainer
 from model.text import BPEVocab
 from model.dataset import FacebookDataset
 from config import get_model_config, get_trainer_config
-from metrics.metrics import nlp_metrics
+from metrics import nlp_metrics
 
 logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt = '%m/%d/%Y %H:%M:%S',
@@ -103,11 +103,11 @@ def main():
             target_str = vocab.ids2string(target[1:-1])
             prediction_str = vocab.ids2string(prediction)
 
-            print('\n')
-            print('Persona info:\n\t{}'.format(persona_info_str))
-            print('Dialog:{}'.format(dialog_str))
-            print('Target:\n\t{}'.format(target_str))
-            print('Prediction:\n\t{}'.format(prediction_str))
+            logger.info('\n')
+            logger.info('Persona info:\n\t{}'.format(persona_info_str))
+            logger.info('Dialog:{}'.format(dialog_str))
+            logger.info('Target:\n\t{}'.format(target_str))
+            logger.info('Prediction:\n\t{}'.format(prediction_str))
 
     def test_func(epoch):
         if (epoch+1) % trainer_config.test_period == 0:

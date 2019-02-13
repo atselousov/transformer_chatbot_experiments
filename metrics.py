@@ -1,10 +1,34 @@
 # author: Xiang Gao @ Microsoft Research, Oct 2018
 # compute NLP evaluation metrics
 
+import io
+import os
 import re
-from util import *
+import subprocess
+import sys
+import time
 from collections import defaultdict
 
+import numpy as np
+
+py_version = sys.version.split('.')[0]
+if py_version == '2':
+    open = io.open
+else:
+    unicode = str
+
+def makedirs(fld):
+    if not os.path.exists(fld):
+        os.makedirs(fld)
+
+def str2bool(s):
+    # to avoid issue like this: https://stackoverflow.com/questions/15008758/parsing-boolean-values-with-argparse
+    if s.lower() in ['t','true','1','y']:
+        return True
+    elif s.lower() in ['f','false','0','n']:
+        return False
+    else:
+        raise ValueError
 
 def calc_nist_bleu(path_refs, path_hyp, fld_out='temp', n_lines=None):
     # call mteval-v14c.pl
@@ -21,7 +45,7 @@ def calc_nist_bleu(path_refs, path_hyp, fld_out='temp', n_lines=None):
 
     time.sleep(1)
     cmd = [
-        'perl','3rdparty/mteval-v14c.pl',
+        'perl','metrics/3rdparty/mteval-v14c.pl',
         '-s', '%s/src.xml'%fld_out,
         '-t', '%s/hyp.xml'%fld_out,
         '-r', '%s/ref.xml'%fld_out,
@@ -53,7 +77,7 @@ def calc_cum_bleu(path_refs, path_hyp):
     # NOTE: this func doesn't support n_lines argument and output is not parsed yet
 
     process = subprocess.Popen(
-            ['perl', '3rdparty/multi-bleu.perl'] + path_refs, 
+            ['perl', 'metrics/3rdparty/multi-bleu.perl'] + path_refs, 
             stdout=subprocess.PIPE, 
             stdin=subprocess.PIPE
             )
@@ -75,7 +99,7 @@ def calc_meteor(path_refs, path_hyp, fld_out='temp', n_lines=None, pretokenized=
 
     cmd = [
             'java', '-Xmx1g',	# heapsize of 1G to avoid OutOfMemoryError
-            '-jar', '3rdparty/meteor-1.5/meteor-1.5.jar', 
+            '-jar', 'metrics/3rdparty/meteor-1.5/meteor-1.5.jar', 
             path_hyp, path_merged_refs, 
             '-r', '%i'%len(path_refs), 	# refCount 
             '-l', 'en', '-norm' 	# also supports language: cz de es fr ar

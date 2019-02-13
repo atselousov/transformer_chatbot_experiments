@@ -203,8 +203,10 @@ class Trainer:
 
             if external_metrics_func:
                 # Store text strings for external metrics
-                full_references.append(self.vocab.ids2string(targets))
-                full_predictions.append(self.vocab.ids2string(predictions))
+                string_targets = list(self.vocab.ids2string(t) for t in targets)
+                string_predictions = list(self.vocab.ids2string(t) for t in predictions)
+                full_references.extend(string_targets)
+                full_predictions.extend(string_predictions)
 
             tqdm_data.set_postfix(dict({'lm_loss': lm_loss, 'loss': loss}, **metrics))
 
@@ -220,7 +222,7 @@ class Trainer:
 
     def train(self, epochs, after_epoch_funcs=[], risk_func=None):
         for epoch in range(epochs):
-            # self._eval_train(epoch, risk_func)
+            self._eval_train(epoch, risk_func)
 
             for func in after_epoch_funcs:
                 func(epoch)

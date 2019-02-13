@@ -30,8 +30,10 @@ from torch.utils.checkpoint import checkpoint
 py_version = sys.version.split('.')[0]
 if py_version == '2':
     open = io.open
+    unicode = unicode
 else:
     unicode = str
+    open = open
 
 def set_seed(seed):
     torch.manual_seed(seed)
