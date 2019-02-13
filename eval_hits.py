@@ -9,7 +9,7 @@ if __name__ == '__main__':
                         rank_candidates=True,
                         sample=False,
                         wild_mode=False,
-                        replace_repeat=True,
+                        replace_repeat=False, #True,
                         replace_ngram=False,
                         detokenize=False,
                         emoji_prob=0,

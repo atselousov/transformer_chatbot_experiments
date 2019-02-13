@@ -188,8 +188,11 @@ class TransformerModule(nn.Module):
 
         positions = torch.cumsum(~padding_mask, dim=-1, dtype=torch.long)
         positions.masked_fill_(padding_mask, self.pos_embeddings.padding_idx)
-        
-        x = self.embeddings(x) * math.sqrt(self.embeddings.embedding_dim) + self.pos_embeddings(positions)
+
+        x = self.embeddings(x)
+        if x.dim() == 4: # additional dialog embeddings
+            x = x.sum(dim=-2)
+        x = x * math.sqrt(self.embeddings.embedding_dim) + self.pos_embeddings(positions)
         x = self.embed_dropout(x)
 
         enc_contexts = sum(enc_contexts, ())
