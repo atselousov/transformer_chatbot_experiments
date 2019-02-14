@@ -13,7 +13,7 @@ from metrics import nlp_metrics
 logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt = '%m/%d/%Y %H:%M:%S',
                     level = logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__file__)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -47,7 +47,8 @@ def main():
                                    annealing_topk=model_config.annealing_topk,
                                    annealing=model_config.annealing,
                                    diversity_coef=model_config.diversity_coef,
-                                   diversity_groups=model_config.diversity_groups)
+                                   diversity_groups=model_config.diversity_groups,
+                                   multiple_choice_head=model_config.multiple_choice_head)
 
     if not trainer_config.load_last:
         load_openai_weights(transformer.transformer_module, 
@@ -70,6 +71,8 @@ def main():
                             lr_warmup=trainer_config.lr_warmup, 
                             lm_weight=trainer_config.lm_weight,
                             risk_weight=trainer_config.risk_weight, 
+                            hits_weight=trainer_config.hits_weight, 
+                            negative_samples=trainer_config.negative_samples,
                             n_jobs=trainer_config.n_jobs, 
                             clip_grad=trainer_config.clip_grad, 
                             device=device,

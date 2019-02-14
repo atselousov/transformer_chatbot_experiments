@@ -67,7 +67,7 @@ class MultiheadAttention(nn.Module):
         if apply_future_mask:
             future_mask = MultiheadAttention._get_future_mask(w.shape[-2:], w.device).unsqueeze(0).unsqueeze(0)
             w.masked_fill_(future_mask, float('-inf'))
-        
+
         if padding_mask is not None:
             w.masked_fill_(padding_mask.unsqueeze(1).unsqueeze(2), float('-inf'))
 
@@ -200,7 +200,7 @@ class TransformerModule(nn.Module):
         x = self.embeddings(x)
         if x.dim() == 4: # additional dialog embeddings
             x = x.sum(dim=-2)
-        x = x * math.sqrt(self.embeddings.embedding_dim) + self.pos_embeddings(positions)
+        x = x + self.pos_embeddings(positions) # * math.sqrt(self.embeddings.embedding_dim) + self.pos_embeddings(positions)
         x = self.embed_dropout(x)
 
         enc_contexts = sum(enc_contexts, ())
@@ -214,5 +214,5 @@ class TransformerModule(nn.Module):
             for layer in self.layers:
                 out = layer(x, padding_mask, *enc_contexts)
                 x = out[0]
-        
+
         return x, padding_mask
