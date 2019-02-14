@@ -200,7 +200,7 @@ class TransformerModule(nn.Module):
         x = self.embeddings(x)
         if x.dim() == 4: # additional dialog embeddings
             x = x.sum(dim=-2)
-        x = x + self.pos_embeddings(positions) # * math.sqrt(self.embeddings.embedding_dim) + self.pos_embeddings(positions)
+        x = x + self.pos_embeddings(positions) # x * math.sqrt(self.embeddings.embedding_dim) + self.pos_embeddings(positions)
         x = self.embed_dropout(x)
 
         enc_contexts = sum(enc_contexts, ())
