@@ -18,7 +18,16 @@ logger = logging.getLogger(__file__)
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--local_rank', type=int, default=-1, help="Distributed training.")
+    parser.add_argument('--server_ip', type=str, default='', help="Used for debugging on GPU machine.")
+    parser.add_argument('--server_port', type=str, default='', help="Used for debugging on GPU machine.")
     args = parser.parse_args()
+
+    if args.server_ip and args.server_port:
+        # Distant debugging - see https://code.visualstudio.com/docs/python/debugging#_attach-to-a-local-script
+        import ptvsd
+        print("Waiting for debugger attach")
+        ptvsd.enable_attach(address=(args.server_ip, args.server_port), redirect_output=True)
+        ptvsd.wait_for_attach()
 
     model_config = get_model_config()
     trainer_config = get_trainer_config()
