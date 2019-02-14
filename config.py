@@ -67,6 +67,7 @@ def get_trainer_config():
                        'risk_weight': 0,
                        'hits_weight': 1,
                        'negative_samples': 2,
+                       'single_input': True,
                        'n_jobs': 0,
                        'label_smoothing': 0.1,
                        'clip_grad': None,

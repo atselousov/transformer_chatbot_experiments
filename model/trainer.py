@@ -32,7 +32,7 @@ class Trainer:
     def __init__(self, model, train_dataset, test_dataset=None, batch_size=8,
                  batch_split=1, lm_weight=0.5, risk_weight=0, hits_weight=0, lr=6.25e-5, lr_warmup=2000, 
                  n_jobs=0, clip_grad=None, label_smoothing=0, device=torch.device('cuda'),
-                 ignore_idxs=[], negative_samples=0):
+                 ignore_idxs=[], negative_samples=0, single_input=False):
         self.model = model.to(device)
         self.lm_criterion = nn.CrossEntropyLoss(ignore_index=self.model.padding_idx).to(device)
         self.hits_criterion = nn.CrossEntropyLoss().to(device)
@@ -55,6 +55,7 @@ class Trainer:
         self.device = device
         self.ignore_idxs = ignore_idxs
         self.negative_samples = negative_samples
+        self.single_input = single_input
 
     def state_dict(self):
         return {'model': self.model.state_dict(),
@@ -87,11 +88,17 @@ class Trainer:
             # We sample negative_samples inside the batch (a bit different from Huggingface original implementation)
             probs = (1 - np.identity(len(y)))/(len(y) - 1)  # don't sample our target as negative sample
             distractors = [np.random.choice(y, size=self.negative_samples, replace=False, p=probs[i]) for i in range(len(y))]
-            distractors = np.stack(distractors).transpose().flatten()   # ordered as: self.negative_samples * bsz
+            distractors = np.stack(distractors).transpose().flatten()   # ordered as: self.negative_samples * bsz, seq_length
             distractors = [torch.tensor(d, dtype=torch.long) for d in distractors]
             distractors = pad_sequence(distractors, batch_first=True, padding_value=self.model.padding_idx)
         else:
             distractors = None
+
+        if self.single_input:
+            # context in y and distractors
+            y_out = torch.cat(contexts + [y_out], dim=-1)
+            distractors = torch.cat([t.repeat(self.negative_samples, 1, 1).view(-1, t.size(-1)) for t in contexts] + [distractors], dim=-1)
+            contexts = []
 
         return contexts, y_out, distractors
 
