@@ -126,16 +126,13 @@ class Trainer:
 
         if max(map(len, persona_info)) > 0:
             persona_info = [torch.tensor(d, dtype=torch.long) for d in persona_info]
-            persona_info = pad_sequence(persona_info, batch_first=True, padding_value=self.model.padding_idx)
             contexts.append(persona_info)
 
         if max(map(len, h)) > 0:
             h = [torch.tensor(d, dtype=torch.long) for d in h]
-            h = pad_sequence(h, batch_first=True, padding_value=self.model.padding_idx)
             contexts.append(h)
 
         y_out = [torch.tensor(d, dtype=torch.long) for d in y]
-        y_out = pad_sequence(y_out, batch_first=True, padding_value=self.model.padding_idx)
 
         if self.negative_samples > 0 and len(y) > 1:
             # sample self.negative_samples as distractors for each instance.
@@ -144,15 +141,19 @@ class Trainer:
             distractors = [np.random.choice(y, size=self.negative_samples, replace=False, p=probs[i]) for i in range(len(y))]
             distractors = np.stack(distractors).transpose().flatten()   # ordered as: self.negative_samples * bsz, seq_length
             distractors = [torch.tensor(d, dtype=torch.long) for d in distractors]
-            distractors = pad_sequence(distractors, batch_first=True, padding_value=self.model.padding_idx)
         else:
-            distractors = None
+            distractors = []
 
         if self.single_input:
             # context in y and distractors
-            y_out = torch.cat(contexts + [y_out], dim=-1)
-            distractors = torch.cat([t.repeat(self.negative_samples, 1, 1).view(-1, t.size(-1)) for t in contexts] + [distractors], dim=-1)
+            y_out = list(torch.cat(pieces, dim=0) for pieces in zip(*(contexts + [y_out])))
+            distractors = list(torch.cat(list(zip(*contexts))[i % len(y)] + (dist,) if len(contexts) else (dist,), dim=0) for i, dist in enumerate(distractors))
             contexts = []
+
+        # Pad now so we pad correctly when we have only a single input (context concatenated with y)
+        contexts = [pad_sequence(c, batch_first=True, padding_value=self.model.padding_idx) for c in contexts]
+        y_out = pad_sequence(y_out, batch_first=True, padding_value=self.model.padding_idx)
+        distractors = pad_sequence(distractors, batch_first=True, padding_value=self.model.padding_idx)
 
         return contexts, y_out, distractors
 

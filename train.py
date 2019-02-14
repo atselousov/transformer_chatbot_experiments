@@ -58,9 +58,9 @@ def main():
 
     logger.info('loading datasets')
     train_dataset = FacebookDataset(trainer_config.train_datasets, vocab, transformer.n_pos_embeddings - 1,
-                                    cache=trainer_config.train_datasets_cache)
+                                    dialog_embeddings=trainer_config.dialog_embeddings, cache=trainer_config.train_datasets_cache)
     test_dataset = FacebookDataset(trainer_config.test_datasets, vocab, transformer.n_pos_embeddings - 1,
-                                   cache=trainer_config.test_datasets_cache)
+                                   dialog_embeddings=trainer_config.dialog_embeddings, cache=trainer_config.test_datasets_cache)
 
     model_trainer = Trainer(transformer,
                             train_dataset,
