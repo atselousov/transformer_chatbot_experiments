@@ -35,17 +35,14 @@ class MultipleChoiceHead(nn.Module):
         nn.init.normal_(self.linear.weight, std=0.02)
         nn.init.normal_(self.linear.bias, 0)
 
-    def forward(self, hidden_states, padding_mask):
+    def forward(self, hidden_state, padding_mask):
         # Get classification logits as the last logit and apply a Linear layer on them
         # hidden_state (bsz, seq_length, hidden_size)
         # padding_mask (bsz, seq_length)
-        last_token_idx = torch.sum(~padding_mask, dim=-1)
-        last_token_idx = last_token_idx.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, -1, hidden_states.size(-1))
-        # (bsz, num_choices, 1, hidden_size)
-        multiple_choice_h = hidden_states.gather(2, last_token_idx).squeeze(2)
-        # (bsz, num_choices, hidden_size)
-        multiple_choice_logits = self.linear(multiple_choice_h).squeeze(-1)
-        # (bsz, num_choices)
+        last_token_idx = torch.sum(~padding_mask, dim=-1) - 1  # (bsz)
+        last_token_idx = last_token_idx.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, hidden_state.size(-1))  # (bsz, 1, hidden_size)
+        multiple_choice_h = hidden_state.gather(dim=-2, index=last_token_idx).squeeze(-2)  # (bsz, hidden_size)
+        multiple_choice_logits = self.linear(multiple_choice_h).squeeze(-1)  # (bsz)
         return multiple_choice_logits
 
 
@@ -54,7 +51,7 @@ class TransformerModel(nn.Module):
                  padding_idx, n_heads, dropout, embed_dropout, attn_dropout, ff_dropout,
                  bos_id, eos_id, max_seq_len=256, beam_size=5, sample=False,
                  length_penalty=0.8, annealing_topk=None, annealing=0, 
-                 diversity_coef=0, diversity_groups=1, n_segments=None, negative_samples=0):
+                 diversity_coef=0, diversity_groups=1, n_segments=None, multiple_choice_head=False):
 
         super(TransformerModel, self).__init__()
 
@@ -81,17 +78,25 @@ class TransformerModel(nn.Module):
         self.pre_softmax = nn.Linear(embeddings_size, n_embeddings, bias=False)
         self.pre_softmax.weight = self.transformer_module.embeddings.weight
 
-        self.multiple_choice_head = MultipleChoiceHead(self.embeddings_size, dropout) if negative_samples > 0 else None
+        self.multiple_choice_head = MultipleChoiceHead(self.embeddings_size, dropout) if multiple_choice_head else None
 
     def forward(self, x, contexts=[]):
         enc_contexts = [self.encode(c) for c in contexts]
         return self.decode(x, enc_contexts)
 
     def encode(self, x):
+        " Returns a tuple(x, padding_mask)"
         return self.transformer_module(x)
 
     def generate(self, enc_x):
         return self.pre_softmax(enc_x)
+
+    def classify(self, x, padding_mask):
+        return self.multiple_choice_head(x, padding_mask)
+
+    def decode_classify(self, x, enc_contexts=[]):
+        x, padding_mask = self.transformer_module(x, enc_contexts)
+        return self.classify(x, padding_mask)
 
     def decode(self, x, enc_contexts=[]):
         x, _ = self.transformer_module(x, enc_contexts)

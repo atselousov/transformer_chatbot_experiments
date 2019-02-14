@@ -75,10 +75,6 @@ class TransformerAgent(Agent):
         torch.set_grad_enabled(False)
 
         model_config = get_model_config()
-        self.vocab = BPEVocab.from_files(model_config.bpe_vocab_path, model_config.bpe_codes_path)
-        self.reply_checker = ReplyChecker(correct_generative=self.opt['correct_generative'],
-                                          split_into_sentences=self.opt['split_into_sentences'])
-
         self.replace_repeat = self.opt['replace_repeat']
         self.replace_ngram = self.opt['replace_ngram']
         self.ngram_size = self.opt['ngram_size']
@@ -89,7 +85,6 @@ class TransformerAgent(Agent):
 
         self.clean_emoji = self.opt['clean_emoji']
         self.check_grammar = self.opt['check_grammar']
-
         # 'max_seq_len': 128,
         # 'beam_size': 1,
         # 'diversity_coef': 0,
@@ -97,6 +92,13 @@ class TransformerAgent(Agent):
         # 'annealing_topk': None,
         # 'annealing': 0,
         # 'length_penalty': 0.6,
+
+        self.vocab = BPEVocab.from_files(model_config.bpe_vocab_path, model_config.bpe_codes_path)
+        if self.replace_repeat:
+            self.reply_checker = ReplyChecker(correct_generative=self.opt['correct_generative'],
+                                            split_into_sentences=self.opt['split_into_sentences'])
+        else:
+            self.reply_checker = None
 
         if self.opt['annealing_topk'] is not None:
             assert self.opt['annealing_topk'] > self.opt['beam_size']
@@ -126,7 +128,10 @@ class TransformerAgent(Agent):
                                           annealing=self.opt['annealing'],
                                           diversity_coef=self.opt['diversity_coef'],
                                           diversity_groups=self.opt['diversity_groups'])
-            self.retrieval_bot = RetrievalBot()
+            if self.add_questions != 0:
+                self.retrieval_bot = RetrievalBot()
+            else:
+                self.retrieval_bot = None
 
             state_dict = torch.load(model_config.checkpoint_path, map_location=lambda storage, loc: storage)
             if 'model' in state_dict:
@@ -336,4 +341,5 @@ class TransformerAgent(Agent):
                         'info': [], 'dialog': deque(maxlen=self.model.n_pos_embeddings-1)}
         self.episode_done = True
         self.observation = None
-        self.reply_checker.clean()
+        if self.replace_repeat:
+            self.reply_checker.clean()
