@@ -68,6 +68,7 @@ def get_trainer_config():
                        'hits_weight': 1,
                        'negative_samples': 2,
                        'single_input': True,
+                       'dialog_embeddings': True,
                        'n_jobs': 0,
                        'label_smoothing': 0.1,
                        'clip_grad': None,

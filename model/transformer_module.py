@@ -184,7 +184,8 @@ class TransformerModule(nn.Module):
         nn.init.normal_(self.pos_embeddings.weight, std=0.02)
 
     def forward(self, x, enc_contexts=[]):
-        padding_mask = x.eq(self.embeddings.padding_idx)
+        # x.dim() == 3 if we have additional dialog embeddings else x.dim() == 2
+        padding_mask = (x[:, :, 0] if x.dim() == 3 else x).eq(self.embeddings.padding_idx)
 
         positions = torch.cumsum(~padding_mask, dim=-1, dtype=torch.long)
         positions.masked_fill_(padding_mask, self.pos_embeddings.padding_idx)
