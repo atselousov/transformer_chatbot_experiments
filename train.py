@@ -65,9 +65,9 @@ def main():
         logger.info('OpenAI weights loaded from {}'.format(trainer_config.openai_parameters_dir))
 
     logger.info('loading datasets')
-    train_dataset = FacebookDataset(trainer_config.train_datasets, vocab, transformer.n_pos_embeddings - 1,
+    train_dataset = FacebookDataset(trainer_config.train_datasets, vocab, max_lengths=(transformer.n_pos_embeddings - 1) // (3 if trainer_config.single_input else 1),  # A bit restrictive here
                                     dialog_embeddings=trainer_config.dialog_embeddings, cache=trainer_config.train_datasets_cache)
-    test_dataset = FacebookDataset(trainer_config.test_datasets, vocab, transformer.n_pos_embeddings - 1,
+    test_dataset = FacebookDataset(trainer_config.test_datasets, vocab, max_lengths=(transformer.n_pos_embeddings - 1) // (3 if trainer_config.single_input else 1),  # A bit restrictive here
                                    dialog_embeddings=trainer_config.dialog_embeddings, cache=trainer_config.test_datasets_cache)
 
     model_trainer = Trainer(transformer,
