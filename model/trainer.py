@@ -94,6 +94,7 @@ class Trainer:
             train_sampler = DistributedSampler(train_dataset)
         self.train_dataloader = DataLoader(train_dataset, batch_size=batch_size//batch_split, sampler=train_sampler, 
                                            num_workers=n_jobs, collate_fn=self.collate_func)
+        self.train_dataset = train_dataset  # used to sample negative examples
         if test_dataset is not None and local_rank in [-1, 0]:  # only do evaluation on main process
             self.test_dataloader = DataLoader(test_dataset, batch_size=batch_size//batch_split, shuffle=False, 
                                             num_workers=n_jobs, collate_fn=self.collate_func)
@@ -135,19 +136,17 @@ class Trainer:
         y_out = [torch.tensor(d, dtype=torch.long) for d in y]
 
         if self.negative_samples > 0 and len(y) > 1:
-            # sample self.negative_samples as distractors for each instance.
-            # We sample negative_samples inside the batch (a bit different from Huggingface original implementation)
-            probs = (1 - np.identity(len(y)))/(len(y) - 1)  # don't sample our target as negative sample
-            distractors = [np.random.choice(y, size=self.negative_samples, replace=False, p=probs[i]) for i in range(len(y))]
-            distractors = np.stack(distractors).transpose().flatten()   # ordered as: self.negative_samples * bsz, seq_length
-            distractors = [torch.tensor(d, dtype=torch.long) for d in distractors]
+            # sample self.negative_samples as distractors for each instance (we may sample the gold y but quite unlikely)
+            distractors = random.sample(range(len(self.train_dataset)), k=(self.negative_samples * len(y)))
+            distractors = [torch.tensor(self.train_dataset[ids][-1], dtype=torch.long) for ids in distractors]
         else:
             distractors = []
 
         if self.single_input:
-            # context in y and distractors
-            y_out = list(torch.cat(pieces, dim=0) for pieces in zip(*(contexts + [y_out])))
-            distractors = list(torch.cat(list(zip(*contexts))[i % len(y)] + (dist,) if len(contexts) else (dist,), dim=0) for i, dist in enumerate(distractors))
+            # we concatenate all the contexts in y (idem for distractors)
+            y_out = [torch.cat(pieces, dim=0) for pieces in zip(*(contexts + [y_out]))]
+            extended_contexts = [c * self.negative_samples for c in contexts]  # negative samples * batch
+            distractors = [torch.cat(pieces, dim=0) for pieces in zip(*(extended_contexts + [distractors]))]
             contexts = []
 
         # Pad now so we pad correctly when we have only a single input (context concatenated with y)
@@ -164,8 +163,9 @@ class Trainer:
         loss = 0
         lm_loss = 0
         risk_loss = 0
+        hits_loss = 0
         for i, (contexts, targets, distractors) in enumerate(tqdm_data):
-            contexts, targets = [c.to(self.device) for c in contexts], targets.to(self.device)
+            contexts, targets, distractors = [c.to(self.device) for c in contexts], targets.to(self.device), distractors.to(self.device)
 
             enc_contexts = []
 
@@ -183,25 +183,24 @@ class Trainer:
                     batch_lm_loss += (self.lm_criterion(prevs.view(-1, prevs.shape[-1]), nexts.view(-1)) / len(contexts))
 
             # s2s loss
+            nexts = targets[:, 1:].contiguous() if targets.dim() == 2 else targets[:, 1:, 0].contiguous()
             if self.hits_weight > 0 and self.negative_samples > 0:
                 # Keep the hidden states
-                nexts = targets[:, 1:].contiguous()
                 hidden_state, padding_mask = self.model.transformer_module(targets, enc_contexts)
                 outputs = self.model.generate(hidden_state[:, :-1].contiguous())
             else:
-                prevs, nexts = targets[:, :-1].contiguous(), targets[:, 1:].contiguous()
-                outputs = self.model.decode(prevs, enc_contexts)
+                outputs = self.model.decode(targets[:, :-1].contiguous(), enc_contexts)
             outputs = F.log_softmax(outputs, dim=-1)
             batch_loss = self.criterion(outputs.view(-1, outputs.shape[-1]), nexts.view(-1))
 
             # hits@1 loss
             if self.hits_weight > 0 and self.negative_samples > 0:
-                extended_contexts = tuple(tuple(t.repeat([self.negative_samples]+[1]*(t.dim()-1)) for t in c) for c in enc_contexts)
+                extended_contexts = tuple(tuple(t.repeat(self.negative_samples, 1, 1) for t in c) for c in enc_contexts)
                 neg_logits = self.model.decode_classify(distractors, extended_contexts)
                 true_logits = self.model.classify(hidden_state, padding_mask)
                 clf_logits = torch.cat((true_logits.view(-1, 1), neg_logits.view(self.negative_samples, -1).transpose(0, 1)), dim=1)
                 clf_labels = torch.tensor([0] * len(true_logits), dtype=torch.long, device=self.device)
-                hits_loss = self.hits_criterion(clf_logits, clf_labels)
+                batch_hits_loss = self.hits_criterion(clf_logits, clf_labels)
 
             # risk loss
             batch_risk_loss = torch.tensor(0, dtype=torch.float, device=self.device)
@@ -231,7 +230,10 @@ class Trainer:
                 batch_risk_loss = torch.mean((batch_risks * batch_probas).sum(dim=-1))
 
             # optimization
-            full_loss = (batch_lm_loss * self.lm_weight + self.risk_weight * batch_risk_loss + batch_loss) / self.batch_split
+            full_loss = (self.lm_weight * batch_lm_loss
+                         + self.risk_weight * batch_risk_loss
+                         + self.hits_weight * batch_hits_loss
+                         + batch_loss) / self.batch_split
             self.optimizer.backward(full_loss)
             if (i + 1) % self.batch_split == 0:
                 if self.clip_grad is not None:
@@ -244,65 +246,67 @@ class Trainer:
             lm_loss = (i * lm_loss + batch_lm_loss.item()) / (i + 1)
             loss = (i * loss + batch_loss.item()) / (i + 1)
             risk_loss = (i * risk_loss + batch_risk_loss.item()) / (i + 1)
+            hits_loss = (i * hits_loss + batch_hits_loss.item()) / (i + 1)
 
-            tqdm_data.set_postfix({'lm_loss': lm_loss, 'loss': loss, 'risk_loss': risk_loss})
+            tqdm_data.set_postfix({'lm_loss': lm_loss, 'loss': loss, 'risk_loss': risk_loss, 'hits_loss': hits_loss})
 
     def _eval_test(self, metric_funcs={}, external_metrics_func=None):
-        self.model.eval()
+        with torch.no_grad():
+            self.model.eval()
 
-        tqdm_data = tqdm(self.test_dataloader, desc='Test')
-        loss = 0
-        lm_loss = 0
-        metrics = {name: 0 for name in metric_funcs.keys()}
-        full_references, full_predictions = [], []
-        for i, (contexts, targets) in enumerate(tqdm_data):
-            contexts, targets = [c.to(self.device) for c in contexts], targets.to(self.device)
+            tqdm_data = tqdm(self.test_dataloader, desc='Test')
+            loss = 0
+            lm_loss = 0
+            metrics = {name: 0 for name in metric_funcs.keys()}
+            full_references, full_predictions = [], []
+            for i, (contexts, targets, distractors) in enumerate(tqdm_data):
+                contexts, targets, distractors = [c.to(self.device) for c in contexts], targets.to(self.device), distractors.to(self.device)
 
-            enc_contexts = []
+                enc_contexts = []
 
-            # lm loss
-            batch_lm_loss = torch.tensor(0, dtype=torch.float, device=self.device)
-            for context in contexts:
-                enc_context = self.model.encode(context.clone())
-                enc_contexts.append(enc_context)
+                # lm loss
+                batch_lm_loss = torch.tensor(0, dtype=torch.float, device=self.device)
+                for context in contexts:
+                    enc_context = self.model.encode(context.clone())
+                    enc_contexts.append(enc_context)
 
-                if self.lm_weight > 0:
-                    context_outputs = self.model.generate(enc_context[0])
-                    ignore_mask = torch.stack([context == idx for idx in self.ignore_idxs], dim=-1).any(dim=-1)
-                    context.masked_fill_(ignore_mask, self.model.padding_idx)
-                    prevs, nexts = context_outputs[:, :-1, :].contiguous(), context[:, 1:].contiguous()
-                    batch_lm_loss += (self.lm_criterion(prevs.view(-1, prevs.shape[-1]), nexts.view(-1)) / len(contexts))
+                    if self.lm_weight > 0:
+                        context_outputs = self.model.generate(enc_context[0])
+                        ignore_mask = torch.stack([context == idx for idx in self.ignore_idxs], dim=-1).any(dim=-1)
+                        context.masked_fill_(ignore_mask, self.model.padding_idx)
+                        prevs, nexts = context_outputs[:, :-1, :].contiguous(), context[:, 1:].contiguous()
+                        batch_lm_loss += (self.lm_criterion(prevs.view(-1, prevs.shape[-1]), nexts.view(-1)) / len(contexts))
 
-            # s2s loss
-            prevs, nexts = targets[:, :-1].contiguous(), targets[:, 1:].contiguous()
-            outputs = self.model.decode(prevs, enc_contexts)
-            outputs = F.log_softmax(outputs, dim=-1)
-            batch_loss = self.criterion(outputs.view(-1, outputs.shape[-1]), nexts.view(-1))
+                # s2s loss
+                prevs, nexts = targets[:, :-1].contiguous(), targets[:, 1:].contiguous()
+                outputs = self.model.decode(prevs, enc_contexts)
+                outputs = F.log_softmax(outputs, dim=-1)
+                batch_loss = self.criterion(outputs.view(-1, outputs.shape[-1]), nexts.view(-1))
 
-            predictions = self.model.beam_search(enc_contexts)
-            target_lens = targets.ne(self.model.padding_idx).sum(dim=-1)
-            targets = [t[1:l-1].tolist() for t, l in zip(targets, target_lens)]
+                predictions = self.model.beam_search(enc_contexts)
+                target_lens = targets.ne(self.model.padding_idx).sum(dim=-1)
+                targets = [t[1:l-1].tolist() for t, l in zip(targets, target_lens)]
 
-            lm_loss = (i * lm_loss + batch_lm_loss.item()) / (i + 1)
-            loss = (i * loss + batch_loss.item()) / (i + 1)
-            for name, func in metric_funcs.items():
-                score = func(predictions, targets)
-                metrics[name] = (metrics[name] * i + score) / (i + 1)
+                lm_loss = (i * lm_loss + batch_lm_loss.item()) / (i + 1)
+                loss = (i * loss + batch_loss.item()) / (i + 1)
+                for name, func in metric_funcs.items():
+                    score = func(predictions, targets)
+                    metrics[name] = (metrics[name] * i + score) / (i + 1)
+
+                if external_metrics_func:
+                    # Store text strings for external metrics
+                    string_targets = list(self.vocab.ids2string(t) for t in targets)
+                    string_predictions = list(self.vocab.ids2string(t) for t in predictions)
+                    full_references.extend(string_targets)
+                    full_predictions.extend(string_predictions)
+
+                tqdm_data.set_postfix(dict({'lm_loss': lm_loss, 'loss': loss}, **metrics))
 
             if external_metrics_func:
-                # Store text strings for external metrics
-                string_targets = list(self.vocab.ids2string(t) for t in targets)
-                string_predictions = list(self.vocab.ids2string(t) for t in predictions)
-                full_references.extend(string_targets)
-                full_predictions.extend(string_predictions)
+                external_metrics = external_metrics_func(full_references, full_predictions)
+                metrics.update(external_metrics)
 
-            tqdm_data.set_postfix(dict({'lm_loss': lm_loss, 'loss': loss}, **metrics))
-
-        if external_metrics_func:
-            external_metrics = external_metrics_func(full_references, full_predictions)
-            metrics.update(external_metrics)
-
-        logger.info(metrics)
+            logger.info(metrics)
 
     def test(self, metric_funcs={}, external_metrics_func=None):
         if hasattr(self, 'test_dataloader'):
