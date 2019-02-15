@@ -1,4 +1,5 @@
 #!/bin/bash
+mkdir checkpoints
 
 mkdir datasets
 cd datasets
