@@ -60,7 +60,7 @@ class ConstantPositionalEmbedding(PositionalEmbedding):
     def forward(self, x):
         batch_size, seq_len = x.size()
 
-        if self._position_embedding is None or seq_len > self._position_embedding.size(0):
+        if self._position_embedding is None or seq_len >= self._position_embedding.size(0):
             self._position_embedding = ConstantPositionalEmbedding.get_embedding(seq_len, self._embedding_dim)
 
         positions = self._get_positions(x)
