@@ -19,7 +19,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import random
 import logging
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, RandomSampler, DistributedSampler
 from tqdm import tqdm
 from .utils import pad_sequence
 from .optim import Adam, NoamOpt
@@ -34,16 +34,66 @@ class Trainer:
     def __init__(self, model, train_dataset, test_dataset=None, batch_size=8,
                  batch_split=1, lm_weight=0.5, risk_weight=0, lr=6.25e-5, lr_warmup=2000, 
                  n_jobs=0, clip_grad=None, label_smoothing=0, device=torch.device('cuda'),
-                 ignore_idxs=[]):
+                 ignore_idxs=[], local_rank=-1, fp16=False, loss_scale=0, linear_schedule=False, epochs=None):
+        
+        if local_rank != -1:
+            torch.cuda.set_device(local_rank)
+            device = torch.device("cuda", local_rank)
+            torch.distributed.init_process_group(backend='nccl')  # Initializes the distributed backend
+        logger.info("device: {}, distributed training: {}, 16-bits training: {}".format(
+            device, bool(local_rank != -1), fp16))
+
         self.model = model.to(device)
+        if local_rank != -1:
+            try:
+                from apex.parallel import DistributedDataParallel
+            except ImportError:
+                raise ImportError("Please install apex for distributed training.")
+            model = DistributedDataParallel(model)
+        if fp16:
+            model.half()
+
         self.lm_criterion = nn.CrossEntropyLoss(ignore_index=self.model.padding_idx).to(device)
         self.criterion = LabelSmoothingLoss(n_labels=self.model.n_embeddings, smoothing=label_smoothing, ignore_index=self.model.padding_idx).to(device)
-        base_optimizer = Adam(self.model.parameters(), lr=lr, weight_decay=0.01)
-        self.optimizer = NoamOpt(self.model.embeddings_size, 1, lr_warmup, base_optimizer)
 
-        self.train_dataloader = DataLoader(train_dataset, batch_size=batch_size//batch_split, shuffle=True, 
+        param_optimizer = list(self.model.named_parameters())  # Here we should remove parameters which are not used during to avoid breaking apex with None grads
+        no_decay = ['bias']
+        optimizer_grouped_parameters = [
+            {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
+            {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+            ]
+
+        try:
+            from apex.optimizers import FusedAdam
+            base_optimizer = FusedAdam(optimizer_grouped_parameters, lr=lr, bias_correction=False, max_grad_norm=1.0)
+        except ImportError:
+            logger.info("Apex not found, not using FusedAdam.")
+            base_optimizer = Adam(optimizer_grouped_parameters, lr=lr)
+        if fp16:
+            try:
+                from apex.optimizers import FP16_Optimizer
+            except ImportError:
+                raise ImportError("Please install apex for fp16.")
+            if loss_scale == 0:
+                base_optimizer = FP16_Optimizer(base_optimizer, dynamic_loss_scale=True)
+            else:
+                base_optimizer = FP16_Optimizer(base_optimizer, static_loss_scale=loss_scale)
+        if linear_schedule:
+            self.optimizer = NoamOpt(self.model.embeddings_size, 1, lr_warmup, base_optimizer, linear_schedule=False, fp16=fp16)
+        else:
+            total_steps = len(train_dataset) * epochs
+            if local_rank != -1:
+                total_steps = total_steps // torch.distributed.get_world_size()
+            self.optimizer = NoamOpt(self.model.embeddings_size, 1, lr_warmup, base_optimizer, linear_schedule=True,
+            lr=lr, total_steps=total_steps, fp16=fp16)
+
+        if local_rank == -1:
+            train_sampler = RandomSampler(train_dataset)
+        else:
+            train_sampler = DistributedSampler(train_dataset)
+        self.train_dataloader = DataLoader(train_dataset, batch_size=batch_size//batch_split, sampler=train_sampler, 
                                            num_workers=n_jobs, collate_fn=self.collate_func)
-        if test_dataset is not None:
+        if test_dataset is not None and local_rank in [-1, 0]:  # only do evaluation on main process
             self.test_dataloader = DataLoader(test_dataset, batch_size=batch_size//batch_split, shuffle=False, 
                                             num_workers=n_jobs, collate_fn=self.collate_func)
         self.vocab = train_dataset.vocab
@@ -54,6 +104,8 @@ class Trainer:
         self.clip_grad = clip_grad
         self.device = device
         self.ignore_idxs = ignore_idxs
+        self.fp16 = fp16
+        self.epochs = epochs
 
     def state_dict(self):
         return {'model': self.model.state_dict(),
@@ -143,7 +195,7 @@ class Trainer:
 
             # optimization
             full_loss = (batch_lm_loss * self.lm_weight + self.risk_weight * batch_risk_loss + batch_loss) / self.batch_split
-            full_loss.backward()
+            self.optimizer.backward(full_loss)
             
             if (i + 1) % self.batch_split == 0:
                 if self.clip_grad is not None:
@@ -220,8 +272,8 @@ class Trainer:
         if hasattr(self, 'test_dataloader'):
             self._eval_test(metric_funcs, external_metrics_func)
 
-    def train(self, epochs, after_epoch_funcs=[], risk_func=None):
-        for epoch in range(epochs):
+    def train(self, after_epoch_funcs=[], risk_func=None):
+        for epoch in range(self.epochs):
             self._eval_train(epoch, risk_func)
 
             for func in after_epoch_funcs:

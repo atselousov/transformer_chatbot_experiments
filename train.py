@@ -66,7 +66,12 @@ def main():
                             n_jobs=trainer_config.n_jobs, 
                             clip_grad=trainer_config.clip_grad, 
                             device=device,
-                            ignore_idxs=vocab.special_tokens_ids)
+                            ignore_idxs=vocab.special_tokens_ids,
+                            local_rank=-1,
+                            fp16=False,
+                            loss_scale=0,
+                            linear_schedule=False,
+                            epochs=None)
 
     if trainer_config.load_last:
         state_dict = torch.load(trainer_config.last_checkpoint_path, map_location=device)
@@ -122,7 +127,7 @@ def main():
 
 
     try:
-        model_trainer.train(trainer_config.n_epochs, after_epoch_funcs=[save_func, sample_text_func, test_func], risk_func=f1_risk)
+        model_trainer.train(after_epoch_funcs=[save_func, sample_text_func, test_func], risk_func=f1_risk)
     except (KeyboardInterrupt, Exception, RuntimeError) as e:
         torch.save(model_trainer.state_dict(), trainer_config.interrupt_checkpoint_path)
         raise e
