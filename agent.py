@@ -86,6 +86,7 @@ class TransformerAgent(Agent):
                                           embed_dropout=model_config.embed_dropout,
                                           attn_dropout=model_config.attn_dropout,
                                           ff_dropout=model_config.ff_dropout,
+                                          embeddings=model_config.embeddings,
                                           bos_id=self.vocab.bos_id,
                                           eos_id=self.vocab.eos_id,
                                           max_seq_len=self.opt['max_seq_len'],

@@ -27,7 +27,7 @@ class TransformerModel(nn.Module):
                  padding_idx, n_heads, dropout, embed_dropout, attn_dropout, ff_dropout,
                  bos_id, eos_id, max_seq_len=256, beam_size=5, sample=False,
                  length_penalty=0.8, annealing_topk=None, annealing=0, 
-                 diversity_coef=0, diversity_groups=1, n_segments=None):
+                 diversity_coef=0, diversity_groups=1, n_segments=None, embeddings=None):
 
         super(TransformerModel, self).__init__()
 
@@ -50,9 +50,11 @@ class TransformerModel(nn.Module):
 
         self.transformer_module = TransformerModule(n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
                                                     padding_idx, n_heads, dropout, embed_dropout, attn_dropout,
-                                                    ff_dropout, n_segments)
+                                                    ff_dropout,
+                                                    embeddings=embeddings,
+                                                    n_segments=n_segments)
         self.pre_softmax = nn.Linear(embeddings_size, n_embeddings, bias=False)
-        self.pre_softmax.weight = self.transformer_module.embeddings.weight
+        self.pre_softmax.weight = self.transformer_module.embedding['DefaultEmbedding']._embedding.weight
 
     def forward(self, x, contexts=[]):
         enc_contexts = [self.encode(c) for c in contexts]

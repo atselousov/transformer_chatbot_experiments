@@ -14,6 +14,7 @@ logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(messa
                     level = logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 def main():
     model_config = get_model_config()
     trainer_config = get_trainer_config()
@@ -33,6 +34,7 @@ def main():
                                    embed_dropout=model_config.embed_dropout,
                                    attn_dropout=model_config.attn_dropout,
                                    ff_dropout=model_config.ff_dropout,
+                                   embeddings=model_config.embeddings,
                                    bos_id=vocab.bos_id,
                                    eos_id=vocab.eos_id,
                                    max_seq_len=model_config.max_seq_len,

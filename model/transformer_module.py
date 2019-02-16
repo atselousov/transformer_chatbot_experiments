@@ -15,9 +15,12 @@
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from .embedding import EmbeddingDict
 from .utils import checkpoint_sequential
 
 
@@ -166,30 +169,26 @@ class TransformerBlock(nn.Module):
 
 
 class TransformerModule(nn.Module):
-    def __init__(self, n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
-                 padding_idx, n_heads, dropout, embed_dropout, attn_dropout, ff_dropout, 
-                 n_segments=None):
+    def __init__(self, n_layers, n_embeddings, n_pos_embeddings, embeddings_size,
+                 padding_idx, n_heads, dropout, embed_dropout, attn_dropout, ff_dropout,
+                 *, embeddings=None, n_segments=None):
         super(TransformerModule, self).__init__()
 
-        self.embeddings = nn.Embedding(n_embeddings, embeddings_size, padding_idx=padding_idx)
-        self.pos_embeddings = nn.Embedding(n_pos_embeddings + 1, embeddings_size, padding_idx=0)
+        assert embeddings is not None
+        self.embedding = EmbeddingDict(*embeddings,
+                                       vocab_size=n_embeddings, embedding_dim=embeddings_size,
+                                       padding_idx=padding_idx, n_positions=n_pos_embeddings)
+
         self.embed_dropout = nn.Dropout(embed_dropout)
         self.layers = nn.ModuleList([TransformerBlock(embeddings_size, n_heads, dropout, attn_dropout, ff_dropout) for _ in range(n_layers)])
         self.n_segments = n_segments
 
-        self._init_weights()
-
-    def _init_weights(self):
-        nn.init.normal_(self.embeddings.weight, std=0.02)
-        nn.init.normal_(self.pos_embeddings.weight, std=0.02)
+        self.padding_idx = padding_idx
 
     def forward(self, x, enc_contexts=[]):
-        padding_mask = x.eq(self.embeddings.padding_idx)
+        padding_mask = x.eq(self.padding_idx)
 
-        positions = torch.cumsum(~padding_mask, dim=-1, dtype=torch.long)
-        positions.masked_fill_(padding_mask, self.pos_embeddings.padding_idx)
-        
-        x = self.embeddings(x) * math.sqrt(self.embeddings.embedding_dim) + self.pos_embeddings(positions)
+        x = self.embedding(x)
         x = self.embed_dropout(x)
 
         enc_contexts = sum(enc_contexts, ())

@@ -23,7 +23,8 @@ def get_model_config():
                        'annealing_topk': None,
                        'annealing': 0,
                        'length_penalty': 0.6,
-                       'n_segments': None})
+                       'n_segments': None,
+                       'embeddings': ['DefaultEmbedding', 'LearnablePositionalEmbedding']})
 
     return config
 
