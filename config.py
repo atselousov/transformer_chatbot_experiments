@@ -63,7 +63,7 @@ def get_trainer_config():
                        'test_datasets_cache': './datasets/test_datasets_cache.bin'})
 
     local_config = AttrDict({'n_epochs': 100,
-                       'batch_size': 3,
+                       'batch_size': 2,
                        'batch_split': 1,
                        'lr': 6.25e-5,
                        'lr_warmup': 16000,
@@ -79,7 +79,7 @@ def get_trainer_config():
                        'test_period': 1,
                        'seed': 0,
                        'device': 'cpu',
-                       'load_last': True, 
+                       'load_last': False, 
                        'openai_parameters_dir': './parameters',
                        'last_checkpoint_path': './checkpoints/last_checkpoint',
                        'eval_references_file': './evaluation_files/eval_references_file',
