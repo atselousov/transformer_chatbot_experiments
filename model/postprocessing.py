@@ -266,7 +266,7 @@ def augment_replica(seq):
         for synnet in synnets:
             for syn in synnet.lemma_names():
                 if syn != word:
-                    synonyms[word].append(syn)
+                    synonyms[word].append(syn.replace('_', ' '))
             break
     if synonyms:
         for key, values in synonyms.items():
