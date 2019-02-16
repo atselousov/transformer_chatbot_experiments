@@ -4,6 +4,12 @@ import torch
 from torch import nn
 
 
+__all__ = ["LearnablePositionalEmbedding",
+           "ConstantPositionalEmbedding",
+           "DefaultEmbedding",
+           "EmbeddingDict"]
+
+
 class BaseEmbedding(nn.Module):
     def __init__(self, *, embedding_dim=None, padding_idx=None, **kwargs):
         super(BaseEmbedding, self).__init__()
@@ -26,7 +32,7 @@ class PositionalEmbedding(BaseEmbedding):
         _, seq_len = x.size()
 
         content_mask = x.ne(self._padding_idx).long()
-        positions = content_mask * torch.arange(seq_len).unsqueeze(0)
+        positions = content_mask * torch.arange(1, seq_len + 1).to(x.device).unsqueeze(0)
 
         return positions
 
@@ -37,6 +43,7 @@ class ConstantPositionalEmbedding(PositionalEmbedding):
 
     @classmethod
     def get_embedding(cls, seq_len, embedding_dim):
+        seq_len += 1
 
         half_dim = embedding_dim // 2
 
@@ -62,13 +69,17 @@ class ConstantPositionalEmbedding(PositionalEmbedding):
 
 
 class LearnablePositionalEmbedding(PositionalEmbedding):
-    def _init_model(self, *, n_positions=512, **kwargs):
+    def _init_model(self, *, n_positions=None, **kwargs):
         assert n_positions is not None
-        self._position_embedding = nn.Embedding(n_positions,
+        self._n_positions = n_positions
+        self._position_embedding = nn.Embedding(n_positions+1,
                                                 self._embedding_dim,
                                                 self._padding_idx)
+        nn.init.normal_(self._position_embedding.weight, std=0.02)
 
     def forward(self, x):
+        _, seq_len = x.size()
+        assert seq_len <= self._n_positions
         positions = self._get_positions(x)
 
         return self._position_embedding(positions)
@@ -80,20 +91,28 @@ class DefaultEmbedding(BaseEmbedding):
         self._embedding = nn.Embedding(vocab_size,
                                        self._embedding_dim,
                                        self._padding_idx)
+        nn.init.normal_(self._embedding.weight, std=0.02)
 
     def forward(self, x):
         return self._embedding(x) * math.sqrt(self._embedding.embedding_dim)
 
 
-class EmbeddingList(nn.Module):
+class EmbeddingDict(nn.Module):
     def __init__(self, *modules, **kwargs):
-        super(EmbeddingList, self).__init__()
+        super(EmbeddingDict, self).__init__()
 
-        self._embeddings = nn.ModuleList([eval(module)(**kwargs) for module in modules])
+        # assert all([m in __all__ for m in modules])
+
+        self._embeddings = nn.ModuleDict({module: eval(module)(**kwargs) for module in modules})
+
+    def __getitem__(self, name):
+        assert name in self._embeddings
+
+        return self._embeddings[name]
 
     def forward(self, x):
         out = 0
-        for embedding in self._embeddings:
+        for embedding in self._embeddings.values():
             out += embedding(x)
 
         return out
@@ -103,7 +122,7 @@ if __name__ == '__main__':
     modules = ['DefaultEmbedding', 'ConstantPositionalEmbedding', 'LearnablePositionalEmbedding']
     parameters = dict(vocab_size=512, embedding_dim=768, padding_idx=0, n_positions=512)
 
-    embedding = EmbeddingList(*modules, **parameters)
+    embedding = EmbeddingDict(*modules, **parameters)
 
     x = torch.randint(0, 128, (8, 256))
 
