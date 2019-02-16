@@ -6,7 +6,6 @@ from model.transformer_model import TransformerModel
 from model.text import BPEVocab
 from model.utils import pad_sequence
 from model.postprocessing import ngram_replaser, ReplyChecker, detokenize, syntax_fix
-from model.retrieval import RetrievalBot, DIALOG_SIZE
 from model.sentiment import pick_emoji, clean_emoji
 from config import get_model_config
 import random
@@ -25,27 +24,9 @@ class TransformerAgent(Agent):
                                 help='Whether the model should parse candidates for ranking.')
         agent_args.add_argument('--sample', type=bool, default=False,
                                 help='Sampling of beam from beam search')
-        agent_args.add_argument('--wild_mode', type=bool, default=False,
-                                help='')
-        agent_args.add_argument('--replace_repeat', type=bool, default=True,
-                                help='')
-        agent_args.add_argument('--replace_ngram', type=bool, default=True,
-                                help='')
-        agent_args.add_argument('--detokenize', type=bool, default=True,
-                                help='')
-        agent_args.add_argument('--emoji_prob', type=float, default=0.5,
-                                help='')
-        agent_args.add_argument('--ngram_size', type=int, default=3,
-                                help='')
-        agent_args.add_argument('--add_questions', type=float, default=0.3,
-                                help='')
         agent_args.add_argument('--clean_emoji', type=bool, default=True,
                                 help='')
         agent_args.add_argument('--check_grammar', type=bool, default=True,
-                                help='')
-        agent_args.add_argument('--correct_generative', type=bool, default=True,
-                                help='')
-        agent_args.add_argument('--split_into_sentences', type=bool, default=True,
                                 help='')
 
         agent_args.add_argument('--max_seq_len', type=int, default=128,
@@ -76,16 +57,6 @@ class TransformerAgent(Agent):
 
         model_config = get_model_config()
         self.vocab = BPEVocab.from_files(model_config.bpe_vocab_path, model_config.bpe_codes_path)
-        self.reply_checker = ReplyChecker(correct_generative=self.opt['correct_generative'],
-                                          split_into_sentences=self.opt['split_into_sentences'])
-
-        self.replace_repeat = self.opt['replace_repeat']
-        self.replace_ngram = self.opt['replace_ngram']
-        self.ngram_size = self.opt['ngram_size']
-        self.detokenize = self.opt['detokenize']
-        self.emoji_prob = self.opt['emoji_prob']
-        self.add_questions = self.opt['add_questions']
-        self.beam_size = self.opt['beam_size']
 
         self.clean_emoji = self.opt['clean_emoji']
         self.check_grammar = self.opt['check_grammar']
@@ -126,7 +97,6 @@ class TransformerAgent(Agent):
                                           annealing=self.opt['annealing'],
                                           diversity_coef=self.opt['diversity_coef'],
                                           diversity_groups=self.opt['diversity_groups'])
-            self.retrieval_bot = RetrievalBot()
 
             state_dict = torch.load(model_config.checkpoint_path, map_location=lambda storage, loc: storage)
             if 'model' in state_dict:
@@ -142,7 +112,6 @@ class TransformerAgent(Agent):
 
         else:
             self.model = shared['model']
-            self.retrieval_bot = shared['retrieval']
 
         self.reset()
 
@@ -162,9 +131,6 @@ class TransformerAgent(Agent):
         for subtext in text.split('\n'):
             subtext = subtext.strip()
             
-            if self.opt['wild_mode'] and len(self.history['info']) == 0 and len(self.history['dialog']) == 0:
-                subtext = 'your persona: ' + subtext
-
             if subtext.startswith('your persona:'):
                 subtext = subtext.replace('your persona:', '').strip()
                 subtext = self._preprocess_text(subtext).strip()
@@ -183,10 +149,6 @@ class TransformerAgent(Agent):
             text = observation['text']
             info, dialog = self._parse(text)
 
-            if info:
-                self.history['str_info'] = ' '.join(info)
-            self.history['str_dialog'].extend(dialog)
-        
             info = sum([self.vocab.string2ids(i) for i in info], [])
             self.history['info'].extend(info)
 
@@ -208,33 +170,6 @@ class TransformerAgent(Agent):
     
     def act(self):
         return self.batch_act([self.observation])[0]
-
-    def _postprocess_text(self, reply, agent):
-        str_reply = self.vocab.ids2string(reply)
-
-        if self.replace_repeat:
-            str_reply = agent.reply_checker.check_reply(str_reply,
-                                                        agent.history['str_dialog'][-1],
-                                                        agent.history['str_info'])
-
-        if self.beam_size > 1 and random.uniform(0, 1) < self.add_questions and '?' not in str_reply:
-            question = self.retrieval_bot.generate_question(list(agent.history['str_dialog']),
-                                                            agent.history['str_info'])
-            if question is not None and question not in str_reply:
-                str_reply = ' '.join([str_reply, question])
-
-        if self.replace_ngram:
-            str_reply = ngram_replaser(agent.history['str_info'], str_reply, n=self.ngram_size)
-
-        reply = self.vocab.string2ids(str_reply)
-
-        if self.detokenize:
-            str_reply = detokenize(str_reply)
-
-        if random.uniform(0, 1) < self.emoji_prob:
-            str_reply = ' '.join([str_reply, pick_emoji(str_reply)])
-
-        return str_reply, reply
 
     def batch_act(self, observations):
         def is_valid_history(history):
@@ -277,12 +212,10 @@ class TransformerAgent(Agent):
             pred_texts = self.model.beam_search(enc_contexts)
 
             for i in range(batch_size):
-                pred_text_str, pred_text = self._postprocess_text(pred_texts[i], valid_observations[i]['agent'])
-
                 valid_observations[i]['agent'].history['dialog'].extend([self.vocab.talker2_bos_id] +
-                                                                        pred_text +
+                                                                        pred_texts[i] +
                                                                         [self.vocab.talker2_eos_id])
-                batch_reply[valid_ids[i]]['text'] = pred_text_str
+                batch_reply[valid_ids[i]]['text'] = self.vocab.ids2string(pred_texts[i])
                 batch_reply[valid_ids[i]]['episode_done'] = valid_observations[i]['agent'].episode_done
 
             if self.opt['rank_candidates']:
@@ -327,13 +260,10 @@ class TransformerAgent(Agent):
         shared = super(TransformerAgent, self).share()
         shared['opt'] = self.opt
         shared['model'] = self.model
-        shared['retrieval'] = self.retrieval_bot
 
         return shared
 
     def reset(self):
-        self.history = {'str_info': None, 'str_dialog': deque(DIALOG_SIZE * ['None'], maxlen=DIALOG_SIZE),
-                        'info': [], 'dialog': deque(maxlen=self.model.n_pos_embeddings-1)}
+        self.history = {'info': [], 'dialog': deque(maxlen=self.model.n_pos_embeddings-1)}
         self.episode_done = True
         self.observation = None
-        self.reply_checker.clean()
