@@ -51,8 +51,10 @@ def main():
         logger.info('OpenAI weights loaded from {}'.format(trainer_config.openai_parameters_dir))
 
     logger.info('loading datasets')
-    train_dataset = FacebookDataset(trainer_config.train_datasets, vocab, transformer.n_pos_embeddings - 1, cache=trainer_config.train_datasets_cache)
-    test_dataset = FacebookDataset(trainer_config.test_datasets, vocab, transformer.n_pos_embeddings - 1, cache=trainer_config.test_datasets_cache)
+    train_dataset = FacebookDataset(trainer_config.train_datasets, vocab, transformer.n_pos_embeddings - 1,
+                                    cache=trainer_config.train_datasets_cache)
+    test_dataset = FacebookDataset(trainer_config.test_datasets, vocab, transformer.n_pos_embeddings - 1,
+                                   cache=trainer_config.test_datasets_cache)
 
     model_trainer = Trainer(transformer,
                             train_dataset,
@@ -68,10 +70,10 @@ def main():
                             device=device,
                             ignore_idxs=vocab.special_tokens_ids,
                             local_rank=-1,
-                            fp16=False,
-                            loss_scale=0,
-                            linear_schedule=False,
-                            epochs=None)
+                            fp16=trainer_config.fp16,
+                            loss_scale=trainer_config.loss_scale,
+                            linear_schedule=trainer_config.linear_schedule,
+                            n_epochs=trainer_config.n_epochs)
 
     if trainer_config.load_last:
         state_dict = torch.load(trainer_config.last_checkpoint_path, map_location=device)

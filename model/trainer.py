@@ -34,8 +34,8 @@ class Trainer:
     def __init__(self, model, train_dataset, test_dataset=None, batch_size=8,
                  batch_split=1, lm_weight=0.5, risk_weight=0, lr=6.25e-5, lr_warmup=2000, 
                  n_jobs=0, clip_grad=None, label_smoothing=0, device=torch.device('cuda'),
-                 ignore_idxs=[], local_rank=-1, fp16=False, loss_scale=0, linear_schedule=False, epochs=None):
-        
+                 ignore_idxs=[], local_rank=-1, fp16=False, loss_scale=0,
+                 linear_schedule=False, n_epochs=0):
         if local_rank != -1:
             torch.cuda.set_device(local_rank)
             device = torch.device("cuda", local_rank)
@@ -81,7 +81,7 @@ class Trainer:
         if linear_schedule:
             self.optimizer = NoamOpt(self.model.embeddings_size, 1, lr_warmup, base_optimizer, linear_schedule=False, fp16=fp16)
         else:
-            total_steps = len(train_dataset) * epochs
+            total_steps = len(train_dataset) * n_epochs
             if local_rank != -1:
                 total_steps = total_steps // torch.distributed.get_world_size()
             self.optimizer = NoamOpt(self.model.embeddings_size, 1, lr_warmup, base_optimizer, linear_schedule=True,
@@ -105,7 +105,7 @@ class Trainer:
         self.device = device
         self.ignore_idxs = ignore_idxs
         self.fp16 = fp16
-        self.epochs = epochs
+        self.n_epochs = n_epochs
 
     def state_dict(self):
         return {'model': self.model.state_dict(),
@@ -273,7 +273,7 @@ class Trainer:
             self._eval_test(metric_funcs, external_metrics_func)
 
     def train(self, after_epoch_funcs=[], risk_func=None):
-        for epoch in range(self.epochs):
+        for epoch in range(self.n_epochs):
             self._eval_train(epoch, risk_func)
 
             for func in after_epoch_funcs:
