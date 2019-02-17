@@ -1,6 +1,7 @@
 import torch
 import random
 import logging
+import argparse
 from model.utils import load_openai_weights, set_seed, f1_score, open, unicode
 from model.transformer_model import TransformerModel
 from model.trainer import Trainer
@@ -15,6 +16,10 @@ logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(messa
 logger = logging.getLogger(__name__)
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--local_rank', type=int, default=-1, help="Distributed training.")
+    args = parser.parse_args()
+
     model_config = get_model_config()
     trainer_config = get_trainer_config()
 
@@ -69,7 +74,7 @@ def main():
                             clip_grad=trainer_config.clip_grad, 
                             device=device,
                             ignore_idxs=vocab.special_tokens_ids,
-                            local_rank=-1,
+                            local_rank=args.local_rank,
                             fp16=trainer_config.fp16,
                             loss_scale=trainer_config.loss_scale,
                             linear_schedule=trainer_config.linear_schedule,
