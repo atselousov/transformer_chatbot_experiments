@@ -128,7 +128,7 @@ class NoamOpt:
         self._step = state_dict['step']
         self.optimizer.load_state_dict(state_dict['optimizer'])
 
-    def backward(loss):
+    def backward(self, loss):
         if self.fp16:
             self.optimizer.backward(loss)
         else:
