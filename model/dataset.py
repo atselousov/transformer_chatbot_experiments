@@ -68,13 +68,15 @@ class FacebookDataset(Dataset):
 
         return dataset
 
-    def __init__(self, paths, vocab, *, max_lengths=2048, min_infos=2, cache=None, augment=False):
+    def __init__(self, paths, vocab, *, max_lengths=2048, min_infos=2, cache=None, augment=False,
+                 syn_proba=0.1):
         assert min_infos > 0
 
         if isinstance(paths, str):
             paths = [paths]
 
         self.augment = augment
+        self.syn_proba = syn_proba
 
         self.vocab = vocab
         self.max_lengths = max_lengths
@@ -91,7 +93,7 @@ class FacebookDataset(Dataset):
     def __len__(self):
         return len(self.data)
 
-    def _augment(self, sentences, info=False, syn_proba=0.2):
+    def _augment(self, sentences, info=False):
         if not self.augment:
             return sentences
 
@@ -104,10 +106,10 @@ class FacebookDataset(Dataset):
             begin = 0
             end = random.randrange(2, len(sentences) + 1, 2)
 
-            sentences = sentences[begin, end]
+            sentences = sentences[begin:end]
 
         def _try2augment(sent):
-            if random.uniform(0, 1) < syn_proba:
+            if random.uniform(0, 1) < self.syn_proba:
                 sent = self.vocab.ids2string(sent)
                 sent = augment_replica(sent)
                 sent = self.vocab.string2ids(sent)
