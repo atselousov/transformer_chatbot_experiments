@@ -103,8 +103,8 @@ class FacebookDataset(Dataset):
             sentences = random.sample(sentences, n_info_samples)
             random.shuffle(sentences)
         else:
-            begin = 0
-            end = random.randrange(2, len(sentences) + 1, 2)
+            begin = random.randrange(0, len(sentences) // 2, 2)
+            end = random.randrange(begin + 2, len(sentences) + 1, 2)
 
             sentences = sentences[begin:end]
 
