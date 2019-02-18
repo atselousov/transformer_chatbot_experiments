@@ -55,21 +55,21 @@ class FacebookDataset(Dataset):
             return data
 
     @staticmethod
-    def make_dataset(data, vocab, max_lengths):
+    def make_dataset(data, vocab):
         dataset = []
         for chat in data:
             persona_info = [vocab.string2ids(s) for s in chat['persona_info']]
-            dialog = [vocab.string2ids(s) for s in chat['dialog']]
 
-            if len(dialog) % 2 == 1:
-                dialog = dialog[:-1]
-
-            dataset.append((persona_info, dialog))
+            dialog = []
+            for i, replica in enumerate(chat['dialog'], 1):
+                dialog.append(vocab.string2ids(replica))
+                if not i % 2:
+                    dataset.append((persona_info, dialog[:]))
 
         return dataset
 
     def __init__(self, paths, vocab, *, max_lengths=2048, min_infos=2, cache=None, augment=False,
-                 aug_syn_proba=0.1):
+                 aug_syn_proba=0.1, aug_vary_length=True):
         assert min_infos > 0
 
         if isinstance(paths, str):
@@ -77,6 +77,7 @@ class FacebookDataset(Dataset):
 
         self.augment = augment
         self.aug_syn_proba = aug_syn_proba
+        self.aug_vary_length = aug_vary_length
 
         self.vocab = vocab
         self.max_lengths = max_lengths
@@ -86,7 +87,7 @@ class FacebookDataset(Dataset):
             self.data = torch.load(cache)
         else:
             parsed_data = sum([FacebookDataset.parse_data(path) for path in paths], [])
-            self.data = FacebookDataset.make_dataset(parsed_data, vocab, max_lengths)
+            self.data = FacebookDataset.make_dataset(parsed_data, vocab)
             if cache:
                 torch.save(self.data, cache)
 
@@ -94,6 +95,7 @@ class FacebookDataset(Dataset):
         return len(self.data)
 
     def _augment(self, sentences, info=False):
+
         if not self.augment:
             return sentences
 
@@ -103,10 +105,11 @@ class FacebookDataset(Dataset):
             sentences = random.sample(sentences, n_info_samples)
             random.shuffle(sentences)
         else:
-            begin = random.randrange(0, len(sentences) // 2, 2)
-            end = random.randrange(begin + 2, len(sentences) + 1, 2)
+            if self.aug_vary_length:
+                begin = random.randrange(0, len(sentences) - 1, 2)
+                end = random.randrange(begin + 2, len(sentences) + 1, 2)
 
-            sentences = sentences[begin:end]
+                sentences = sentences[begin:end]
 
         def _try2augment(sent):
             if random.uniform(0, 1) < self.aug_syn_proba:
@@ -115,9 +118,9 @@ class FacebookDataset(Dataset):
                 sent = self.vocab.string2ids(sent)
             return sent
 
-        sentences = map(_try2augment, sentences)
+        sentences = list(map(_try2augment, sentences)) if self.aug_syn_proba > 0 else sentences
 
-        return list(sentences)
+        return sentences
 
     def __getitem__(self, idx):
         persona_info, dialog = self.data[idx]
