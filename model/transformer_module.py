@@ -16,10 +16,18 @@
 
 import math
 import torch
+import logging
 import torch.nn as nn
 import torch.nn.functional as F
 from .utils import checkpoint_sequential
 
+logger = logging.getLogger(__file__)
+
+try:
+    from apex.normalization.fused_layer_norm import FusedLayerNorm as LayerNorm
+except ImportError:
+    print("Better speed can be achieved with apex installed from https://www.github.com/nvidia/apex.")
+    from torch.nn import LayerNorm
 
 class MultiheadAttention(nn.Module):
     @classmethod
@@ -138,9 +146,9 @@ class TransformerBlock(nn.Module):
         super(TransformerBlock, self).__init__()
 
         self.attn = MultiheadAttention(n_features, n_heads, attn_dropout)
-        self.attn_norm = nn.LayerNorm(n_features)
+        self.attn_norm = LayerNorm(n_features)
         self.ff = FeedForward(n_features, 4 * n_features, ff_dropout)
-        self.ff_norm = nn.LayerNorm(n_features)
+        self.ff_norm = LayerNorm(n_features)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, padding_mask, *contexts):
