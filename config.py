@@ -1,13 +1,15 @@
 from attrdict import AttrDict
 import torch
 from model.utils import openai_transformer_config
+import git
 
+repo = git.Repo(search_parent_directories=True)
 
 def get_model_config():
     default_config = openai_transformer_config()
     config = AttrDict({'bpe_vocab_path': './parameters/bpe.vocab',
                        'bpe_codes_path': './parameters/bpe.code',
-                       'checkpoint_path': './checkpoints/last_checkpoint', 
+                       'checkpoint_path': './checkpoints/last_checkpoint',  # Keep the checpoint folder for the checkpoints of the agents
                        'n_layers': default_config.n_layers,
                        'n_pos_embeddings': 512,
                        'embeddings_size': default_config.embeddings_size,
@@ -42,12 +44,15 @@ def get_trainer_config():
                        'test_period': 1,
                        'seed': 0,
                        'device': 'cuda',
-                       'load_last': True, 
+                       'load_last': '',  # Now that we save several experiments you can put the path of the checpoint file you want to load here
+                       'repo_id': str(repo),
+                       'repo_sha': str(repo.head.object.hexsha),
+                       'repo_branch': str(repo.active_branch),
                        'openai_parameters_dir': './parameters',
-                       'last_checkpoint_path': './checkpoints/last_checkpoint',
-                       'eval_references_file': './evaluation_files/eval_references_file',
-                       'eval_predictions_file': './evaluation_files/eval_predictions_file',
-                       'interrupt_checkpoint_path': './checkpoints/interrupt_checkpoint',
+                       'last_checkpoint_path': 'last_checkpoint',  # there are now in the ./runs/XXX/ experiments folders
+                       'eval_references_file': 'eval_references_file',
+                       'eval_predictions_file': 'eval_predictions_file',
+                       'interrupt_checkpoint_path': 'interrupt_checkpoint',  # there are now in the ./runs/XXX/ experiments folders
                        'train_datasets': ['./datasets/ConvAI2/train_self_revised_no_cands.txt',
                                           './datasets/ConvAI2/train_self_original_no_cands.txt',
                                           './datasets/DailyDialog/train_dailydialog.txt'],
@@ -70,12 +75,15 @@ def get_trainer_config():
                        'test_period': 1,
                        'seed': 0,
                        'device': 'cpu',
-                       'load_last': True, 
+                       'load_last': '', 
+                       'repo_id': str(repo),
+                       'repo_sha': str(repo.head.object.hexsha),
+                       'repo_branch': str(repo.active_branch),
                        'openai_parameters_dir': './parameters',
-                       'last_checkpoint_path': './checkpoints/last_checkpoint',
-                       'eval_references_file': './evaluation_files/eval_references_file',
-                       'eval_predictions_file': './evaluation_files/eval_predictions_file',
-                       'interrupt_checkpoint_path': './checkpoints/interrupt_checkpoint',
+                       'last_checkpoint_path': 'last_checkpoint',
+                       'eval_references_file': 'eval_references_file',
+                       'eval_predictions_file': 'eval_predictions_file',
+                       'interrupt_checkpoint_path': 'interrupt_checkpoint',
                        'train_datasets': ['./datasets/ConvAI2/train_self_revised_no_cands.txt',
                                           './datasets/ConvAI2/train_self_original_no_cands.txt',
                                           './datasets/DailyDialog/train_dailydialog.txt'],

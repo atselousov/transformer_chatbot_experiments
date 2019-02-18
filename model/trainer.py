@@ -20,6 +20,7 @@ import torch.nn.functional as F
 import random
 import logging
 from torch.utils.data import DataLoader
+from tensorboardX import SummaryWriter
 from tqdm import tqdm
 from .utils import pad_sequence
 from .optim import Adam, NoamOpt
@@ -31,7 +32,7 @@ logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(messa
 logger = logging.getLogger(__name__)
 
 class Trainer:
-    def __init__(self, model, train_dataset, test_dataset=None, batch_size=8,
+    def __init__(self, model, train_dataset, writer=SummaryWriter(), test_dataset=None, batch_size=8,
                  batch_split=1, lm_weight=0.5, risk_weight=0, lr=6.25e-5, lr_warmup=2000, 
                  n_jobs=0, clip_grad=None, label_smoothing=0, device=torch.device('cuda'),
                  ignore_idxs=[]):
@@ -47,6 +48,7 @@ class Trainer:
             self.test_dataloader = DataLoader(test_dataset, batch_size=batch_size//batch_split, shuffle=False, 
                                             num_workers=n_jobs, collate_fn=self.collate_func)
         self.vocab = train_dataset.vocab
+        self.writer = writer
 
         self.batch_split = batch_split
         self.lm_weight = lm_weight
@@ -113,7 +115,7 @@ class Trainer:
             outputs = self.model.decode(prevs, enc_contexts)
             outputs = F.log_softmax(outputs, dim=-1)
             batch_loss = self.criterion(outputs.view(-1, outputs.shape[-1]), nexts.view(-1))
-            
+
             # risk loss
             batch_risk_loss = torch.tensor(0, dtype=torch.float, device=self.device)
             if risk_func is not None and self.risk_weight > 0:
@@ -144,7 +146,7 @@ class Trainer:
             # optimization
             full_loss = (batch_lm_loss * self.lm_weight + self.risk_weight * batch_risk_loss + batch_loss) / self.batch_split
             full_loss.backward()
-            
+
             if (i + 1) % self.batch_split == 0:
                 if self.clip_grad is not None:
                     for group in self.optimizer.param_groups:
@@ -158,6 +160,15 @@ class Trainer:
             risk_loss = (i * risk_loss + batch_risk_loss.item()) / (i + 1)
 
             tqdm_data.set_postfix({'lm_loss': lm_loss, 'loss': loss, 'risk_loss': risk_loss})
+
+            # logging
+            global_step = epoch * len(self.train_dataloader) + i
+            self.writer.add_scalar("batch_lm_loss", batch_lm_loss.item(), global_step=global_step)
+            self.writer.add_scalar("batch_risk_loss", batch_risk_loss.item(), global_step=global_step)
+            self.writer.add_scalar("batch_loss", batch_loss.item(), global_step=global_step)
+            self.writer.add_scalar("full_loss", full_loss.item(), global_step=global_step)
+            self.writer.add_scalar("lr", self.optimizer.get_lr(), global_step=global_step)
+
 
     def _eval_test(self, metric_funcs={}, external_metrics_func=None):
         self.model.eval()
