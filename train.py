@@ -1,6 +1,7 @@
 import torch
 import random
 import logging
+import argparse
 from model.utils import load_openai_weights, set_seed, f1_score, open, unicode
 from model.transformer_model import TransformerModel
 from model.trainer import Trainer
@@ -15,6 +16,10 @@ logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(messa
 logger = logging.getLogger(__name__)
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--local_rank', type=int, default=-1, help="Distributed training.")
+    args = parser.parse_args()
+
     model_config = get_model_config()
     trainer_config = get_trainer_config()
 
@@ -51,8 +56,10 @@ def main():
         logger.info('OpenAI weights loaded from {}'.format(trainer_config.openai_parameters_dir))
 
     logger.info('loading datasets')
-    train_dataset = FacebookDataset(trainer_config.train_datasets, vocab, transformer.n_pos_embeddings - 1, cache=trainer_config.train_datasets_cache)
-    test_dataset = FacebookDataset(trainer_config.test_datasets, vocab, transformer.n_pos_embeddings - 1, cache=trainer_config.test_datasets_cache)
+    train_dataset = FacebookDataset(trainer_config.train_datasets, vocab, transformer.n_pos_embeddings - 1,
+                                    cache=trainer_config.train_datasets_cache)
+    test_dataset = FacebookDataset(trainer_config.test_datasets, vocab, transformer.n_pos_embeddings - 1,
+                                   cache=trainer_config.test_datasets_cache)
 
     model_trainer = Trainer(transformer,
                             train_dataset,
@@ -66,7 +73,12 @@ def main():
                             n_jobs=trainer_config.n_jobs, 
                             clip_grad=trainer_config.clip_grad, 
                             device=device,
-                            ignore_idxs=vocab.special_tokens_ids)
+                            ignore_idxs=vocab.special_tokens_ids,
+                            local_rank=args.local_rank,
+                            fp16=trainer_config.fp16,
+                            loss_scale=trainer_config.loss_scale,
+                            linear_schedule=trainer_config.linear_schedule,
+                            n_epochs=trainer_config.n_epochs)
 
     if trainer_config.load_last:
         state_dict = torch.load(trainer_config.last_checkpoint_path, map_location=device)
@@ -122,7 +134,7 @@ def main():
 
 
     try:
-        model_trainer.train(trainer_config.n_epochs, after_epoch_funcs=[save_func, sample_text_func, test_func], risk_func=f1_risk)
+        model_trainer.train(after_epoch_funcs=[save_func, sample_text_func, test_func], risk_func=f1_risk)
     except (KeyboardInterrupt, Exception, RuntimeError) as e:
         torch.save(model_trainer.state_dict(), trainer_config.interrupt_checkpoint_path)
         raise e
