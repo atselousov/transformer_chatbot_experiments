@@ -17,7 +17,7 @@ WORKDIR /workspace
 COPY ./ ./
 
 RUN pip install -r requirements.txt
-RUN python -c "import nltk; nltk.download('wordnet'); nltk.download('averaged_perceptron_tagger'); nltk.download('vader_lexicon'); nltk.download('perluniprops')"
+RUN python -c "import nltk; nltk.download('wordnet'); nltk.download('averaged_perceptron_tagger'); nltk.download('vader_lexicon'); nltk.download('perluniprops'); nltk.download('punkt')"
 RUN git clone https://github.com/facebookresearch/ParlAI.git && cd ParlAI && python setup.py develop
 RUN git clone https://github.com/NVIDIA/apex.git && cd apex && python setup.py install --cuda_ext --cpp_ext
 RUN python -m spacy download en

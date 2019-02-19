@@ -4,6 +4,7 @@ import random
 import logging
 import argparse
 import json
+import sys
 from tensorboardX import SummaryWriter
 
 from model.utils import load_openai_weights, set_seed, f1_score, open, unicode
@@ -19,15 +20,14 @@ logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(messa
                     level = logging.INFO)
 logger = logging.getLogger(__file__)
 
-# Activate this once we have the distributed training setup in place: logging only on main process
-# class DummyWriter:
-#     """ Used for distributed training (from NVIDIA apex example).
-#         A dummy logger used so that only the main process write and log informations.
-#     """
-#     def __init__(self, *input, **kwargs):
-#         pass
-#     def add_scalar(self, *input, **kwargs):
-#         pass
+class DummyWriter:
+    """ Used for distributed training (from NVIDIA apex example).
+        A dummy logger used so that only the main process write and log informations.
+    """
+    def __init__(self, *input, **kwargs):
+        self.log_dir = "dummy_file"
+    def add_scalar(self, *input, **kwargs):
+        pass
 
 def main():
     parser = argparse.ArgumentParser()
@@ -43,15 +43,18 @@ def main():
         ptvsd.enable_attach(address=(args.server_ip, args.server_port), redirect_output=True)
         ptvsd.wait_for_attach()
 
-    # # Activate this once we have the distributed training setup in place: logging only on main process
-    # if args.local_rank not in [-1, 0]:
-    #     sys.stdout = open(f"./log_distributed_{args.local_rank}", "w")
-    #     writer = DummyWriter()
-    #     logfile = "dummy_file"
-    # else:
-    writer = SummaryWriter()
+    # Log only on main process
+    if args.local_rank not in [-1, 0]:
+        sys.stdout = open(f"./runs/log_distributed_{args.local_rank}", "w")  # dump sdtout
+        writer = DummyWriter()
+    else:
+        writer = SummaryWriter()
+
     model_config = get_model_config()
     trainer_config = get_trainer_config()
+
+    logger.info("model config: {}".format(model_config))
+    logger.info("trainer config: {}".format(trainer_config))
 
     log_dir = writer.log_dir
     interrupt_checkpoint_path = os.path.join(log_dir, trainer_config.interrupt_checkpoint_path)
@@ -96,11 +99,18 @@ def main():
         logger.info('OpenAI weights loaded from {}'.format(trainer_config.openai_parameters_dir))
 
     logger.info('loading datasets')
-    train_dataset = FacebookDataset(trainer_config.train_datasets, vocab, max_lengths=(transformer.n_pos_embeddings - 1) // (3 if trainer_config.single_input else 1),  # A bit restrictive here
-                                    dialog_embeddings=trainer_config.dialog_embeddings, cache=trainer_config.train_datasets_cache, 
-                                    augment=True, aug_syn_proba=trainer_config.aug_syn_proba)
-    test_dataset = FacebookDataset(trainer_config.test_datasets, vocab, max_lengths=(transformer.n_pos_embeddings - 1) // (3 if trainer_config.single_input else 1),  # A bit restrictive here
-                                   dialog_embeddings=trainer_config.dialog_embeddings, cache=trainer_config.test_datasets_cache)
+    train_dataset = FacebookDataset(trainer_config.train_datasets, vocab,
+                                    max_lengths=(transformer.n_pos_embeddings - 1) // (3 if trainer_config.single_input else 1),  # A bit restrictive here
+                                    dialog_embeddings=trainer_config.dialog_embeddings,
+                                    cache=trainer_config.train_datasets_cache, 
+                                    augment=trainer_config.persona_augment,
+                                    aug_syn_proba=trainer_config.persona_aug_syn_proba)
+    test_dataset = FacebookDataset(trainer_config.test_datasets, vocab,
+                                   max_lengths=(transformer.n_pos_embeddings - 1) // (3 if trainer_config.single_input else 1),  # A bit restrictive here
+                                   dialog_embeddings=trainer_config.dialog_embeddings,
+                                   cache=trainer_config.test_datasets_cache,
+                                   augment=False,
+                                   aug_syn_proba=0.0)
 
     model_trainer = Trainer(transformer,
                             train_dataset,
@@ -110,6 +120,8 @@ def main():
                             batch_split=trainer_config.batch_split,
                             lr=trainer_config.lr,
                             lr_warmup=trainer_config.lr_warmup,
+                            weight_decay=trainer_config.weight_decay,
+                            s2s_weight=trainer_config.s2s_weight,
                             lm_weight=trainer_config.lm_weight,
                             risk_weight=trainer_config.risk_weight,
                             hits_weight=trainer_config.hits_weight,

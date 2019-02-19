@@ -17,6 +17,7 @@
 import os
 import random
 import torch
+from tqdm import tqdm
 from torch.utils.data import Dataset
 from .postprocessing import augment_replica
 
@@ -57,7 +58,7 @@ class FacebookDataset(Dataset):
     @staticmethod
     def make_dataset(data, vocab):
         dataset = []
-        for chat in data:
+        for chat in tqdm(data):
             persona_info = [vocab.string2ids(s) for s in chat['persona_info']]
 
             dialog = []

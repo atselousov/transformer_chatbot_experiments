@@ -35,8 +35,8 @@ logger = logging.getLogger(__file__)
 
 class Trainer:
     def __init__(self, model, train_dataset, writer=SummaryWriter(), test_dataset=None, batch_size=8,
-                 batch_split=1, lm_weight=0.5, risk_weight=0, lr=6.25e-5, lr_warmup=2000, 
-                 n_jobs=0, clip_grad=None, label_smoothing=0, device=torch.device('cuda'),
+                 batch_split=1, s2s_weight=1, lm_weight=0.5, risk_weight=0, hits_weight=0, lr=6.25e-5, lr_warmup=2000, 
+                 n_jobs=0, clip_grad=None, label_smoothing=0, device=torch.device('cuda'), weight_decay=0.1,
                  ignore_idxs=[], local_rank=-1, fp16=False, loss_scale=0,
                  linear_schedule=False, n_epochs=0, negative_samples=0, single_input=False):
         if local_rank != -1:
@@ -63,7 +63,7 @@ class Trainer:
         param_optimizer = list(self.model.named_parameters())  # Here we should remove parameters which are not used during to avoid breaking apex with None grads
         no_decay = ['bias']
         optimizer_grouped_parameters = [
-            {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
+            {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': weight_decay},
             {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
             ]
 
@@ -85,7 +85,7 @@ class Trainer:
         if not linear_schedule:
             self.optimizer = NoamOpt(self.model.embeddings_size, 1, lr_warmup, base_optimizer, linear_schedule=False, fp16=fp16)
         else:
-            total_steps = len(train_dataset) * n_epochs
+            total_steps = len(train_dataset) * n_epochs // batch_size
             if local_rank != -1:
                 total_steps = total_steps // torch.distributed.get_world_size()
             self.optimizer = NoamOpt(self.model.embeddings_size, 1, lr_warmup, base_optimizer, linear_schedule=True,
@@ -105,6 +105,8 @@ class Trainer:
         self.writer = writer
 
         self.batch_split = batch_split
+        self.batch_size = batch_size
+        self.s2s_weight = s2s_weight
         self.lm_weight = lm_weight
         self.risk_weight = risk_weight
         self.hits_weight = hits_weight
@@ -139,7 +141,7 @@ class Trainer:
 
         y_out = [torch.tensor(d, dtype=torch.long) for d in y]
 
-        if self.negative_samples > 0 and len(y) > 1:
+        if self.negative_samples > 0 and len(y) > 0:
             # sample self.negative_samples as distractors for each instance (we may sample the gold y but quite unlikely)
             distractors = random.sample(range(len(self.train_dataset)), k=(self.negative_samples * len(y)))
             distractors = [torch.tensor(self.train_dataset[ids][-1], dtype=torch.long) for ids in distractors]
@@ -164,7 +166,7 @@ class Trainer:
         self.model.train()
 
         tqdm_data = tqdm(self.train_dataloader, desc='Train (epoch #{})'.format(epoch))
-        loss = 0
+        s2s_loss = 0
         lm_loss = 0
         risk_loss = 0
         hits_loss = 0
@@ -173,7 +175,7 @@ class Trainer:
 
             enc_contexts = []
 
-            # lm loss
+            # lm loss on contexts
             batch_lm_loss = torch.tensor(0, dtype=torch.float, device=self.device)
             for context in contexts:
                 enc_context = self.model.encode(context.clone())
@@ -186,18 +188,18 @@ class Trainer:
                     prevs, nexts = context_outputs[:, :-1, :].contiguous(), context[:, 1:].contiguous()
                     batch_lm_loss += (self.lm_criterion(prevs.view(-1, prevs.shape[-1]), nexts.view(-1)) / len(contexts))
 
-            # s2s loss
+            # s2s loss on targets
             nexts = targets[:, 1:].contiguous() if targets.dim() == 2 else targets[:, 1:, 0].contiguous()
             if self.hits_weight > 0 and self.negative_samples > 0:
-                # Keep the hidden states
+                # Keep the hidden states for hits@1 loss
                 hidden_state, padding_mask = self.model.transformer_module(targets, enc_contexts)
                 outputs = self.model.generate(hidden_state[:, :-1].contiguous())
             else:
                 outputs = self.model.decode(targets[:, :-1].contiguous(), enc_contexts)
             outputs = F.log_softmax(outputs, dim=-1)
-            batch_loss = self.criterion(outputs.view(-1, outputs.shape[-1]), nexts.view(-1))
+            batch_s2s_loss = self.criterion(outputs.view(-1, outputs.shape[-1]), nexts.view(-1))
 
-            # hits@1 loss
+            # hits@1 loss on distractors and targets
             if self.hits_weight > 0 and self.negative_samples > 0:
                 extended_contexts = tuple(tuple(t.repeat(self.negative_samples, 1, 1) for t in c) for c in enc_contexts)
                 neg_logits = self.model.decode_classify(distractors, extended_contexts)
@@ -237,7 +239,7 @@ class Trainer:
             full_loss = (self.lm_weight * batch_lm_loss
                          + self.risk_weight * batch_risk_loss
                          + self.hits_weight * batch_hits_loss
-                         + batch_loss) / self.batch_split
+                         + self.s2s_weight * batch_s2s_loss) / self.batch_split
             self.optimizer.backward(full_loss)
 
             if (i + 1) % self.batch_split == 0:
@@ -248,20 +250,21 @@ class Trainer:
                 self.optimizer.step()
                 self.optimizer.zero_grad()
 
-            lm_loss = (i * lm_loss + batch_lm_loss.item()) / (i + 1)
-            loss = (i * loss + batch_loss.item()) / (i + 1)
-            risk_loss = (i * risk_loss + batch_risk_loss.item()) / (i + 1)
-            hits_loss = (i * hits_loss + batch_hits_loss.item()) / (i + 1)
+                lm_loss = (i * lm_loss + batch_lm_loss.item()) / (i + 1)
+                s2s_loss = (i * s2s_loss + batch_s2s_loss.item()) / (i + 1)
+                risk_loss = (i * risk_loss + batch_risk_loss.item()) / (i + 1)
+                hits_loss = (i * hits_loss + batch_hits_loss.item()) / (i + 1)
 
-            tqdm_data.set_postfix({'lm_loss': lm_loss, 'loss': loss, 'risk_loss': risk_loss, 'hits_loss': hits_loss})
+                tqdm_data.set_postfix({'lm_loss': lm_loss, 's2s_loss': s2s_loss, 'risk_loss': risk_loss, 'hits_loss': hits_loss})
 
-            # logging
-            global_step = epoch * len(self.train_dataloader) + i
-            self.writer.add_scalar("batch_lm_loss", batch_lm_loss.item(), global_step=global_step)
-            self.writer.add_scalar("batch_risk_loss", batch_risk_loss.item(), global_step=global_step)
-            self.writer.add_scalar("batch_loss", batch_loss.item(), global_step=global_step)
-            self.writer.add_scalar("full_loss", full_loss.item(), global_step=global_step)
-            self.writer.add_scalar("lr", self.optimizer.get_lr(), global_step=global_step)
+                # logging
+                global_step = (epoch * len(self.train_dataloader) + (i + 1)) // self.batch_split
+                self.writer.add_scalar("losses/batch_lm_loss", batch_lm_loss.item(), global_step=global_step)
+                self.writer.add_scalar("losses/batch_risk_loss", batch_risk_loss.item(), global_step=global_step)
+                self.writer.add_scalar("losses/batch_hits_loss", batch_hits_loss.item(), global_step=global_step)
+                self.writer.add_scalar("losses/batch_s2s_loss", batch_s2s_loss.item(), global_step=global_step)
+                self.writer.add_scalar("losses/full_loss", full_loss.item(), global_step=global_step)
+                self.writer.add_scalar("training/lr", self.optimizer.get_lr(), global_step=global_step)
 
 
     def _eval_test(self, metric_funcs={}, external_metrics_func=None):
@@ -332,3 +335,7 @@ class Trainer:
 
             for func in after_epoch_funcs:
                 func(epoch)
+
+        if self.n_epochs == 0:
+            for func in after_epoch_funcs:
+                func(0)
