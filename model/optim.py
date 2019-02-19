@@ -139,12 +139,6 @@ class NoamOpt:
         else:
             loss.backward()
 
-    def backward(self, loss):
-        if self.fp16:
-            self.optimizer.backward(loss)
-        else:
-            loss.backward()
-
     def zero_grad(self):
         return self.optimizer.zero_grad()
 
@@ -180,4 +174,3 @@ class NoamOpt:
         assert self.lr is not None and self.total_steps is not None
 
         return self.lr * self.warmup_linear(step/self.total_steps, self.warmup)
-    
