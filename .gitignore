@@ -10,3 +10,4 @@ metrics/3rdparty/meteor-*
 .vscode
 temp
 __pycache__
+runs/*

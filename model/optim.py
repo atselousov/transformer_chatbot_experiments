@@ -148,6 +148,9 @@ class NoamOpt:
     def zero_grad(self):
         return self.optimizer.zero_grad()
 
+    def get_lr(self):
+        return self.optimizer.param_groups[0]['lr']
+
     @property
     def param_groups(self):
         return self.optimizer.param_groups
