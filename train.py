@@ -4,6 +4,7 @@ import random
 import logging
 import argparse
 import json
+import sys
 from tensorboardX import SummaryWriter
 
 from model.utils import load_openai_weights, set_seed, f1_score, open, unicode
@@ -19,15 +20,14 @@ logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(messa
                     level = logging.INFO)
 logger = logging.getLogger(__file__)
 
-# Activate this once we have the distributed training setup in place: logging only on main process
-# class DummyWriter:
-#     """ Used for distributed training (from NVIDIA apex example).
-#         A dummy logger used so that only the main process write and log informations.
-#     """
-#     def __init__(self, *input, **kwargs):
-#         pass
-#     def add_scalar(self, *input, **kwargs):
-#         pass
+class DummyWriter:
+    """ Used for distributed training (from NVIDIA apex example).
+        A dummy logger used so that only the main process write and log informations.
+    """
+    def __init__(self, *input, **kwargs):
+        self.log_dir = "dummy_file"
+    def add_scalar(self, *input, **kwargs):
+        pass
 
 def main():
     parser = argparse.ArgumentParser()
@@ -43,13 +43,13 @@ def main():
         ptvsd.enable_attach(address=(args.server_ip, args.server_port), redirect_output=True)
         ptvsd.wait_for_attach()
 
-    # # Activate this once we have the distributed training setup in place: logging only on main process
-    # if args.local_rank not in [-1, 0]:
-    #     sys.stdout = open(f"./log_distributed_{args.local_rank}", "w")
-    #     writer = DummyWriter()
-    #     logfile = "dummy_file"
-    # else:
-    writer = SummaryWriter()
+    # Log only on main process
+    if args.local_rank not in [-1, 0]:
+        sys.stdout = open(f"./runs/log_distributed_{args.local_rank}", "w")  # dump sdtout
+        writer = DummyWriter()
+    else:
+        writer = SummaryWriter()
+
     model_config = get_model_config()
     trainer_config = get_trainer_config()
 
