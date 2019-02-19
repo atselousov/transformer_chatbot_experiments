@@ -44,7 +44,7 @@ def get_trainer_config():
                        'negative_samples': 2,
                        'single_input': True,
                        'dialog_embeddings': True,
-                       'n_jobs': 4,
+                       'n_jobs': 0,
                        'label_smoothing': 0.1,
                        'clip_grad': None,
                        'test_period': 1,
@@ -63,13 +63,13 @@ def get_trainer_config():
                        'eval_references_file': 'eval_references_file',
                        'eval_predictions_file': 'eval_predictions_file',
                        'interrupt_checkpoint_path': 'interrupt_checkpoint',  # there are now in the ./runs/XXX/ experiments folders
-                       'train_datasets': ['./datasets/ConvAI2/train_self_revised_no_cands.txt',
-                                          './datasets/ConvAI2/train_self_original_no_cands.txt',
-                                          './datasets/DailyDialog/train_dailydialog.txt'],
+                       'train_datasets': ['./datasets/ConvAI2/train_self_original_no_cands.txt',],
+                                          # './datasets/ConvAI2/train_self_revised_no_cands.txt',
+                                          # './datasets/DailyDialog/train_dailydialog.txt'],
                        'train_datasets_cache': './datasets/train_datasets_cache.bin',
-                       'test_datasets': ['./datasets/ConvAI2/valid_self_revised_no_cands.txt',
-                                         './datasets/ConvAI2/valid_self_original_no_cands.txt',
-                                         './datasets/DailyDialog/valid_dailydialog.txt'],
+                       'test_datasets': ['./datasets/ConvAI2/valid_self_original_no_cands.txt',],
+                                         # './datasets/ConvAI2/valid_self_revised_no_cands.txt',
+                                         # './datasets/DailyDialog/valid_dailydialog.txt'],
                        'test_datasets_cache': './datasets/test_datasets_cache.bin'})
 
     local_config = AttrDict({'n_epochs': 100,
