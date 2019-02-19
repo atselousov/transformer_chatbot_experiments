@@ -96,11 +96,18 @@ def main():
         logger.info('OpenAI weights loaded from {}'.format(trainer_config.openai_parameters_dir))
 
     logger.info('loading datasets')
-    train_dataset = FacebookDataset(trainer_config.train_datasets, vocab, max_lengths=(transformer.n_pos_embeddings - 1) // (3 if trainer_config.single_input else 1),  # A bit restrictive here
-                                    dialog_embeddings=trainer_config.dialog_embeddings, cache=trainer_config.train_datasets_cache, 
-                                    augment=True, aug_syn_proba=trainer_config.aug_syn_proba)
-    test_dataset = FacebookDataset(trainer_config.test_datasets, vocab, max_lengths=(transformer.n_pos_embeddings - 1) // (3 if trainer_config.single_input else 1),  # A bit restrictive here
-                                   dialog_embeddings=trainer_config.dialog_embeddings, cache=trainer_config.test_datasets_cache)
+    train_dataset = FacebookDataset(trainer_config.train_datasets, vocab,
+                                    max_lengths=(transformer.n_pos_embeddings - 1) // (3 if trainer_config.single_input else 1),  # A bit restrictive here
+                                    dialog_embeddings=trainer_config.dialog_embeddings,
+                                    cache=trainer_config.train_datasets_cache, 
+                                    augment=trainer_config.persona_augment,
+                                    aug_syn_proba=trainer_config.persona_aug_syn_proba)
+    test_dataset = FacebookDataset(trainer_config.test_datasets, vocab,
+                                   max_lengths=(transformer.n_pos_embeddings - 1) // (3 if trainer_config.single_input else 1),  # A bit restrictive here
+                                   dialog_embeddings=trainer_config.dialog_embeddings,
+                                   cache=trainer_config.test_datasets_cache,
+                                   augment=False,
+                                   aug_syn_proba=0.0)
 
     model_trainer = Trainer(transformer,
                             train_dataset,
