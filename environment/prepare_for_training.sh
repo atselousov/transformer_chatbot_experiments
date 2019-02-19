@@ -23,7 +23,7 @@ rm parameters.tar.gz
 
 pip install -r requirements.txt
 pip install torch
-python -c "import nltk; nltk.download('wordnet'); nltk.download('averaged_perceptron_tagger'); nltk.download('vader_lexicon'); nltk.download('perluniprops')"
+python -c "import nltk; nltk.download('wordnet'); nltk.download('averaged_perceptron_tagger'); nltk.download('vader_lexicon'); nltk.download('perluniprops'); nltk.download('punkt')"
 python -m spacy download en
 
 cd ..
