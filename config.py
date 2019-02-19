@@ -36,7 +36,7 @@ def get_trainer_config():
                        'batch_size': 256,
                        'batch_split': 64,
                        'lr': 6.25e-5,
-                       'lr_warmup': 0.1,  # a fraction of total training (epoch * train_set_length) if linear_schedule == True
+                       'lr_warmup': 0.002,  # a fraction of total training (epoch * train_set_length) if linear_schedule == True
                        's2s_weight': 1,
                        'lm_weight': 0.5,
                        'risk_weight': 0,
@@ -50,8 +50,7 @@ def get_trainer_config():
                        'test_period': 1,
                        'seed': 0,
                        'device': 'cuda',
-                       'persona_augment': False,
-                       'persona_aug_syn_proba': 0.0,
+                       'aug_syn_proba': 0.1,
                        'fp16': False,
                        'loss_scale': 0,
                        'linear_schedule': True,
@@ -77,7 +76,7 @@ def get_trainer_config():
                        'batch_size': 2,
                        'batch_split': 1,
                        'lr': 6.25e-5,
-                       'lr_warmup': 0.1,  # a fraction of total training (epoch * train_set_length) if linear_schedule == True
+                       'lr_warmup': 0.002,  # a fraction of total training (epoch * train_set_length) if linear_schedule == True
                        's2s_weight': 1,
                        'lm_weight': 0.5,
                        'risk_weight': 0,
@@ -91,8 +90,7 @@ def get_trainer_config():
                        'test_period': 1,
                        'seed': 0,
                        'device': 'cpu',
-                       'persona_augment': False,
-                       'persona_aug_syn_proba': 0.0,
+                       'aug_syn_proba': 0.1,
                        'load_last': True, 
                        'fp16': False,
                        'loss_scale': 0,
