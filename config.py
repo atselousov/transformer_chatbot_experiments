@@ -32,7 +32,7 @@ def get_model_config():
 
 
 def get_trainer_config():
-    config = AttrDict({'n_epochs': 3,
+    config = AttrDict({'n_epochs': 0,
                        'batch_size': 256,
                        'batch_split': 64,
                        'lr': 6.25e-5,
