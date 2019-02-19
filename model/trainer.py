@@ -36,7 +36,7 @@ logger = logging.getLogger(__file__)
 class Trainer:
     def __init__(self, model, train_dataset, writer=SummaryWriter(), test_dataset=None, batch_size=8,
                  batch_split=1, s2s_weight=1, lm_weight=0.5, risk_weight=0, hits_weight=0, lr=6.25e-5, lr_warmup=2000, 
-                 n_jobs=0, clip_grad=None, label_smoothing=0, device=torch.device('cuda'),
+                 n_jobs=0, clip_grad=None, label_smoothing=0, device=torch.device('cuda'), weight_decay=0.1,
                  ignore_idxs=[], local_rank=-1, fp16=False, loss_scale=0,
                  linear_schedule=False, n_epochs=0, negative_samples=0, single_input=False):
         if local_rank != -1:
@@ -63,7 +63,7 @@ class Trainer:
         param_optimizer = list(self.model.named_parameters())  # Here we should remove parameters which are not used during to avoid breaking apex with None grads
         no_decay = ['bias']
         optimizer_grouped_parameters = [
-            {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': 0.01},
+            {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay': weight_decay},
             {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
             ]
 

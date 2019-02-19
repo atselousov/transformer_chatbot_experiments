@@ -120,6 +120,7 @@ def main():
                             batch_split=trainer_config.batch_split,
                             lr=trainer_config.lr,
                             lr_warmup=trainer_config.lr_warmup,
+                            weight_decay=trainer_config.weight_decay,
                             s2s_weight=trainer_config.s2s_weight,
                             lm_weight=trainer_config.lm_weight,
                             risk_weight=trainer_config.risk_weight,
