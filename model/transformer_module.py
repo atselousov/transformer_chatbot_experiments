@@ -89,27 +89,34 @@ class MultiheadAttention(nn.Module):
 
         return x
 
-    def forward(self, query, key, value, padding_mask, layer_past=None):
+    def forward(self, query, key, value, padding_mask, attn_past_kv=None, attn_past_q=None):
         qkv_same = (query.data_ptr() == key.data_ptr() == value.data_ptr())
         kv_same = (key.data_ptr() == value.data_ptr())
 
         if qkv_same:
             query, key, value = self.qkv_proj(query).split(self.n_features, dim=-1)
             apply_future_mask = True  # self-attention
-            if layer_past is not None:  # we have already computed part of this
-                past_key, past_value = layer_past[0], layer_past[1]  # transpose back cf below
+            if attn_past_kv is not None:  # we have already computed part of key, value of this
+                past_key, past_value = attn_past_kv[0], attn_past_kv[1]
                 key = torch.cat((past_key, key), dim=-2)
                 value = torch.cat((past_value, value), dim=-2)
-            present = torch.stack((key, value))  # transpose to have same shapes for stacking
         elif kv_same:
-            q_w, q_b = self.qkv_proj.weight[:self.n_features, :], self.qkv_proj.bias[:self.n_features]
-            query = F.linear(query, q_w, q_b)
-            kv_w, kv_b = self.qkv_proj.weight[self.n_features:, :], self.qkv_proj.bias[self.n_features:]
-            key, value = F.linear(key, kv_w, kv_b).split(self.n_features, dim=-1)
+            if attn_past_q is not None:  # we have already computed this query
+                query = attn_past_q
+            else:
+                q_w, q_b = self.qkv_proj.weight[:self.n_features, :], self.qkv_proj.bias[:self.n_features]
+                query = F.linear(query, q_w, q_b)
+            if attn_past_kv is not None:  # we have already computed key, value of this
+                key, value = attn_past_kv[0], attn_past_kv[1]
+            else:
+                kv_w, kv_b = self.qkv_proj.weight[self.n_features:, :], self.qkv_proj.bias[self.n_features:]
+                key, value = F.linear(key, kv_w, kv_b).split(self.n_features, dim=-1)
             apply_future_mask = False
-            present = None
         else:
             assert False
+
+        save_key_value = torch.stack((key, value))
+        save_query = query
 
         query = self._split_heads(query)
         key = self._split_heads(key, is_key=True)
@@ -120,7 +127,7 @@ class MultiheadAttention(nn.Module):
 
         x = self.out_proj(x)
 
-        return x, present
+        return x, save_key_value, save_query # we can reuse: key/value for next forward steps, query for next attention ops
 
 
 class FeedForward(nn.Module):
@@ -166,12 +173,14 @@ class TransformerBlock(nn.Module):
 
         full_attn = 0
         n_attn = len(inputs) // 2
-        present = None
-        for i in range(0, len(inputs), 2):
+        save_kv = []
+        query = None
+        if layer_past is None:
+            layer_past = [None] * n_attn
+        for i, attn_past_kv in zip(range(0, len(inputs), 2), layer_past):
             c, m = inputs[i], inputs[i+1].byte()
-            a, tmp_present = self.attn(x, c, c, m, layer_past=layer_past)
-            if tmp_present is not None:
-                present = tmp_present
+            a, key_value, query = self.attn(x, c, c, m, attn_past_kv=attn_past_kv, attn_past_q=query)
+            save_kv.append(key_value)
             full_attn += (a / n_attn)
 
         full_attn = self.dropout(full_attn)
@@ -181,7 +190,7 @@ class TransformerBlock(nn.Module):
         f = self.dropout(f)
         x = self.ff_norm(x + f)
 
-        return (x, padding_mask) + contexts + (present,)
+        return (x, padding_mask) + contexts + (save_kv,)
 
 
 class TransformerModule(nn.Module):
@@ -215,7 +224,7 @@ class TransformerModule(nn.Module):
         positions = torch.cumsum(~padding_mask, dim=-1, dtype=torch.long) + past_length
         positions.masked_fill_(padding_mask, self.pos_embeddings.padding_idx)
 
-        x = self.embeddings(x)
+        x = self.embeddings(x) * math.sqrt(self.embeddings.embedding_dim)  # !!! TODO(thom): remove, adding this to use last checkpoint
         if x.dim() == 4: # additional dialog embeddings
             x = x.sum(dim=-2)
         x = x + self.pos_embeddings(positions) # x * math.sqrt(self.embeddings.embedding_dim) + self.pos_embeddings(positions)
@@ -229,10 +238,10 @@ class TransformerModule(nn.Module):
             out = checkpoint_sequential(self.layers, self.n_segments, x, padding_mask, *enc_contexts)
             x = out[0]
         else:
-            presents = []
+            save_key_values = []
             for layer, layer_past in zip(self.layers, past):
                 out = layer(x, padding_mask, *enc_contexts, layer_past=layer_past)
                 x = out[0]
-                presents.append(out[-1])
+                save_key_values.append(out[-1])
 
-        return x, padding_mask, presents
+        return x, padding_mask, save_key_values
