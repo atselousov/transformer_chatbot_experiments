@@ -195,7 +195,7 @@ class TransformerModule(nn.Module):
 
     def forward(self, x, enc_contexts=[]):
         # x.dim() == 3 if we have additional dialog embeddings else x.dim() == 2
-        padding_mask = (x[:, :, 0] if x.dim() == 3 else x).eq(self.embeddings.padding_idx)
+        padding_mask = (x[:, :, 0] if x.dim() == 3 else x).eq(self.padding_idx)
 
         if x.dim() == 3:
             x = self.embedding(x[:, :, 0]) + self.embedding['DefaultEmbedding'](x[:, :, 1])

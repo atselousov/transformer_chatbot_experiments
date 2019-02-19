@@ -26,7 +26,7 @@ def get_model_config():
                        'annealing': 0,
                        'length_penalty': 0.6,
                        'n_segments': None,
-                       'embeddings': ['DefaultEmbedding', 'LearnablePositionalEmbedding']})
+                       'embeddings': ['DefaultEmbedding', 'LearnablePositionalEmbedding'],
                        'multiple_choice_head': True})
 
     return config
@@ -90,7 +90,7 @@ def get_trainer_config():
                        'seed': 0,
                        'device': 'cpu',
                        'aug_syn_proba': 0.1,
-                       'load_last': True, 
+                       'load_last': True,
                        'fp16': False,
                        'loss_scale': 0,
                        'linear_schedule': True,
@@ -102,7 +102,7 @@ def get_trainer_config():
                        'train_datasets': # ['./datasets/ConvAI2/train_self_revised_no_cands.txt',],
                                           ['./datasets/ConvAI2/train_self_original_no_cands.txt',],
                                         #   './datasets/DailyDialog/train_dailydialog.txt'],
-                       'load_last': '', 
+                       'load_last': '',
                        'repo_id': str(repo),
                        'repo_sha': str(repo.head.object.hexsha),
                        'repo_branch': str(repo.active_branch),
