@@ -141,7 +141,7 @@ class Trainer:
 
         y_out = [torch.tensor(d, dtype=torch.long) for d in y]
 
-        if self.negative_samples > 0 and len(y) > 1:
+        if self.negative_samples > 0 and len(y) > 0:
             # sample self.negative_samples as distractors for each instance (we may sample the gold y but quite unlikely)
             distractors = random.sample(range(len(self.train_dataset)), k=(self.negative_samples * len(y)))
             distractors = [torch.tensor(self.train_dataset[ids][-1], dtype=torch.long) for ids in distractors]
