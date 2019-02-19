@@ -194,8 +194,16 @@ class BPEVocab:
 
         return ids
 
+    @staticmethod
+    def to_ids_list(list_obj):
+        # Take care of inputs with dialog embeddings (list of pairs, we keep only the first item in the pairs)
+        if isinstance(list_obj[0], int):
+            return list_obj
+        assert isinstance(list_obj[0][0], int)
+        return list(item[0] for item in list_obj)
 
     def ids2string(self, ids):
+        ids = self.to_ids_list(ids)
         bpe_tokens = [self.id2token[id] for id in ids]
 
         return ''.join(bpe_tokens).replace(BPEVocab.we, ' ')

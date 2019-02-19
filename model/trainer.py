@@ -335,3 +335,7 @@ class Trainer:
 
             for func in after_epoch_funcs:
                 func(epoch)
+
+        if self.n_epochs == 0:
+            for func in after_epoch_funcs:
+                func(epoch)
