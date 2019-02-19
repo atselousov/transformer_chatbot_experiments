@@ -18,7 +18,7 @@ import os
 import random
 import torch
 from torch.utils.data import Dataset
-from .text import BPEVocab
+from .postprocessing import augment_replica
 
 
 class FacebookDataset(Dataset):
@@ -55,64 +55,100 @@ class FacebookDataset(Dataset):
             return data
 
     @staticmethod
-    def make_dataset(data, vocab, max_lengths):
+    def make_dataset(data, vocab):
         dataset = []
         for chat in data:
             persona_info = [vocab.string2ids(s) for s in chat['persona_info']]
-            dialog = [vocab.string2ids(s) for s in chat['dialog']]
 
-            if len(dialog) % 2 == 1:
-                dialog = dialog[:-1]
-
-            dataset.append((persona_info, dialog))
+            dialog = []
+            for i, replica in enumerate(chat['dialog'], 1):
+                dialog.append(vocab.string2ids(replica))
+                if not i % 2:
+                    dataset.append((persona_info, dialog[:]))
 
         return dataset
 
-    def __init__(self, paths, vocab, max_lengths=2048, min_infos=2, cache=None):
+    def __init__(self, paths, vocab, *, max_lengths=2048, min_infos=2, dialog_embeddings=False, 
+                 cache=None, augment=False, aug_syn_proba=0.1, aug_vary_length=True):
         assert min_infos > 0
 
         if isinstance(paths, str):
             paths = [paths]
 
+        self.augment = augment
+        self.aug_syn_proba = aug_syn_proba
+        self.aug_vary_length = aug_vary_length
+
         self.vocab = vocab
         self.max_lengths = max_lengths
         self.min_infos = min_infos
+        self.dialog_embeddings = dialog_embeddings
 
         if cache and os.path.exists(cache):
             self.data = torch.load(cache)
         else:
             parsed_data = sum([FacebookDataset.parse_data(path) for path in paths], [])
-            self.data = FacebookDataset.make_dataset(parsed_data, vocab, max_lengths)
+            self.data = FacebookDataset.make_dataset(parsed_data, vocab)
             if cache:
                 torch.save(self.data, cache)
 
     def __len__(self):
         return len(self.data)
 
+    def _augment(self, sentences, info=False):
+
+        if not self.augment:
+            return sentences
+
+        if info:
+            n_info_samples = max(self.min_infos, random.randint(1, len(sentences)))
+            n_info_samples = min(n_info_samples, len(sentences))
+            sentences = random.sample(sentences, n_info_samples)
+            random.shuffle(sentences)
+        else:
+            if self.aug_vary_length:
+                begin = random.randrange(0, len(sentences) - 1, 2)
+                end = random.randrange(begin + 2, len(sentences) + 1, 2)
+
+                sentences = sentences[begin:end]
+
+        def _try2augment(sent):
+            if random.uniform(0, 1) < self.aug_syn_proba:
+                sent = self.vocab.ids2string(sent)
+                sent = augment_replica(sent)
+                sent = self.vocab.string2ids(sent)
+            return sent
+
+        sentences = list(map(_try2augment, sentences)) if self.aug_syn_proba > 0 else sentences
+
+        return sentences
+
     def __getitem__(self, idx):
         persona_info, dialog = self.data[idx]
 
         if len(persona_info):
-            n_info_samples = max(self.min_infos, random.randint(1, len(persona_info)))
-            n_info_samples = min(n_info_samples, len(persona_info))
-            persona_info = random.sample(persona_info, n_info_samples)
-            random.shuffle(persona_info)
-            persona_info = sum(persona_info, []) 
+            persona_info = self._augment(persona_info, info=True)
+            persona_info = sum(persona_info, [])
             persona_info = [self.vocab.info_bos_id] + persona_info[:self.max_lengths-2] + [self.vocab.info_eos_id]
+            if self.dialog_embeddings:
+                persona_info = [[tok, persona_info[0]] for tok in persona_info]
 
-        dialog_begin = 0
-        dialog_end = random.randrange(2, len(dialog)+1, 2)
+        dialog = self._augment(dialog)
 
         h = []
-        for i, ids in enumerate(dialog[dialog_begin:dialog_end-1], 1):
+        for i, ids in enumerate(dialog[:-1], 1):
             if i % 2 == 1:
                 ids = [self.vocab.talker1_bos_id] + ids + [self.vocab.talker1_eos_id]
             else:
                 ids = [self.vocab.talker2_bos_id] + ids + [self.vocab.talker2_eos_id]
+            if self.dialog_embeddings:
+                ids = [[tok, ids[0]] for tok in ids]
             h.extend(ids)
         h = h[-self.max_lengths:]
 
-        y = [self.vocab.bos_id] + dialog[dialog_end-1] + [self.vocab.eos_id]
+        y = [self.vocab.bos_id] + dialog[-1] + [self.vocab.eos_id]
         y = y[:self.max_lengths]
+        if self.dialog_embeddings:
+            y = [[tok, y[0]] for tok in y]
 
         return persona_info, h, y
