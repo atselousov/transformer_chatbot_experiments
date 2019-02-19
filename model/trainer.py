@@ -338,4 +338,4 @@ class Trainer:
 
         if self.n_epochs == 0:
             for func in after_epoch_funcs:
-                func(0)
+                func(-1)

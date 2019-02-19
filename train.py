@@ -82,6 +82,7 @@ def main():
                                    ff_dropout=model_config.ff_dropout,
                                    bos_id=vocab.bos_id,
                                    eos_id=vocab.eos_id,
+                                   sent_dialog_id=vocab.sent_dialog_id,
                                    max_seq_len=model_config.max_seq_len,
                                    beam_size=model_config.beam_size,  
                                    length_penalty=model_config.length_penalty,
@@ -91,7 +92,8 @@ def main():
                                    diversity_coef=model_config.diversity_coef,
                                    diversity_groups=model_config.diversity_groups,
                                    multiple_choice_head=model_config.multiple_choice_head,
-                                   single_input=trainer_config.single_input)
+                                   single_input=trainer_config.single_input,
+                                   dialog_embeddings=trainer_config.dialog_embeddings)
 
     if not trainer_config.load_last:
         load_openai_weights(transformer.transformer_module, 
@@ -156,7 +158,8 @@ def main():
         return {'nist': nist, 'bleu': bleu, 'meteor': meteor, 'entropy': entropy, 'div': div, 'avg_len': avg_len}
 
     def save_func(epoch):
-        torch.save(model_trainer.state_dict(), last_checkpoint_path)
+        if epoch != -1:
+            torch.save(model_trainer.state_dict(), last_checkpoint_path)
 
     def sample_text_func(epoch):
         n_samples = 5

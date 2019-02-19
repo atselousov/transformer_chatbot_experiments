@@ -74,7 +74,7 @@ def get_trainer_config():
                                          # './datasets/DailyDialog/valid_dailydialog.txt'],
                        'test_datasets_cache': './datasets/test_datasets_cache.bin'})
 
-    local_config = AttrDict({'n_epochs': 100,
+    local_config = AttrDict({'n_epochs': 0,
                        'batch_size': 2,
                        'batch_split': 1,
                        'lr': 6.25e-5,
@@ -116,13 +116,13 @@ def get_trainer_config():
                        'eval_references_file': 'eval_references_file',
                        'eval_predictions_file': 'eval_predictions_file',
                        'interrupt_checkpoint_path': 'interrupt_checkpoint',
-                       'train_datasets': ['./datasets/ConvAI2/train_self_revised_no_cands.txt',
-                                          './datasets/ConvAI2/train_self_original_no_cands.txt',
-                                          './datasets/DailyDialog/train_dailydialog.txt'],
+                       'train_datasets': ['./datasets/ConvAI2/train_self_original_no_cands.txt',],
+                                          #'./datasets/ConvAI2/train_self_revised_no_cands.txt',
+                                          #'./datasets/DailyDialog/train_dailydialog.txt'],
                        'train_datasets_cache': './datasets/train_datasets_cache.bin',
-                       'test_datasets': ['./datasets/ConvAI2/valid_self_revised_no_cands.txt',
-                                         './datasets/ConvAI2/valid_self_original_no_cands.txt',
-                                         './datasets/DailyDialog/valid_dailydialog.txt'],
+                       'test_datasets': ['./datasets/ConvAI2/valid_self_original_no_cands.txt',],
+                                         #'./datasets/ConvAI2/valid_self_revised_no_cands.txt',
+                                         #'./datasets/DailyDialog/valid_dailydialog.txt'],
                        'test_datasets_cache': './datasets/test_datasets_cache.bin'})
 
     return config if torch.cuda.is_available() else local_config
