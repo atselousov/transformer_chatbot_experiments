@@ -90,7 +90,8 @@ def main():
                                    annealing=model_config.annealing,
                                    diversity_coef=model_config.diversity_coef,
                                    diversity_groups=model_config.diversity_groups,
-                                   multiple_choice_head=model_config.multiple_choice_head)
+                                   multiple_choice_head=model_config.multiple_choice_head,
+                                   single_input=trainer_config.single_input)
 
     if not trainer_config.load_last:
         load_openai_weights(transformer.transformer_module, 

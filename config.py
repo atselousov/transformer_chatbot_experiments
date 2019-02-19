@@ -82,7 +82,7 @@ def get_trainer_config():
                        'weight_decay': 0.01,
                        's2s_weight': 1,
                        'lm_weight': 0.5,
-                       'risk_weight': 0,
+                       'risk_weight': 0.5,
                        'hits_weight': 1,
                        'negative_samples': 2,
                        'single_input': True,
