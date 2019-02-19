@@ -67,7 +67,7 @@ class MultiheadAttention(nn.Module):
         if apply_future_mask:
             future_mask = MultiheadAttention._get_future_mask(w.shape[-2:], w.device).unsqueeze(0).unsqueeze(0)
             w.masked_fill_(future_mask, float('-inf'))
-        
+
         if padding_mask is not None:
             w.masked_fill_(padding_mask.unsqueeze(1).unsqueeze(2), float('-inf'))
 
@@ -192,12 +192,16 @@ class TransformerModule(nn.Module):
         nn.init.normal_(self.pos_embeddings.weight, std=0.02)
 
     def forward(self, x, enc_contexts=[]):
-        padding_mask = x.eq(self.embeddings.padding_idx)
+        # x.dim() == 3 if we have additional dialog embeddings else x.dim() == 2
+        padding_mask = (x[:, :, 0] if x.dim() == 3 else x).eq(self.embeddings.padding_idx)
 
         positions = torch.cumsum(~padding_mask, dim=-1, dtype=torch.long)
         positions.masked_fill_(padding_mask, self.pos_embeddings.padding_idx)
-        
-        x = self.embeddings(x) * math.sqrt(self.embeddings.embedding_dim) + self.pos_embeddings(positions)
+
+        x = self.embeddings(x)
+        if x.dim() == 4: # additional dialog embeddings
+            x = x.sum(dim=-2)
+        x = x + self.pos_embeddings(positions) # x * math.sqrt(self.embeddings.embedding_dim) + self.pos_embeddings(positions)
         x = self.embed_dropout(x)
 
         enc_contexts = sum(enc_contexts, ())
@@ -211,5 +215,5 @@ class TransformerModule(nn.Module):
             for layer in self.layers:
                 out = layer(x, padding_mask, *enc_contexts)
                 x = out[0]
-        
+
         return x, padding_mask

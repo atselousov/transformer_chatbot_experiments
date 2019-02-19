@@ -13,12 +13,21 @@ from metrics import nlp_metrics
 logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
                     datefmt = '%m/%d/%Y %H:%M:%S',
                     level = logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__file__)
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--local_rank', type=int, default=-1, help="Distributed training.")
+    parser.add_argument('--server_ip', type=str, default='', help="Used for debugging on GPU machine.")
+    parser.add_argument('--server_port', type=str, default='', help="Used for debugging on GPU machine.")
     args = parser.parse_args()
+
+    if args.server_ip and args.server_port:
+        # Distant debugging - see https://code.visualstudio.com/docs/python/debugging#_attach-to-a-local-script
+        import ptvsd
+        print("Waiting for debugger attach")
+        ptvsd.enable_attach(address=(args.server_ip, args.server_port), redirect_output=True)
+        ptvsd.wait_for_attach()
 
     model_config = get_model_config()
     trainer_config = get_trainer_config()
@@ -47,7 +56,8 @@ def main():
                                    annealing_topk=model_config.annealing_topk,
                                    annealing=model_config.annealing,
                                    diversity_coef=model_config.diversity_coef,
-                                   diversity_groups=model_config.diversity_groups)
+                                   diversity_groups=model_config.diversity_groups,
+                                   multiple_choice_head=model_config.multiple_choice_head)
 
     if not trainer_config.load_last:
         load_openai_weights(transformer.transformer_module, 
@@ -56,22 +66,25 @@ def main():
         logger.info('OpenAI weights loaded from {}'.format(trainer_config.openai_parameters_dir))
 
     logger.info('loading datasets')
-    train_dataset = FacebookDataset(trainer_config.train_datasets, vocab, transformer.n_pos_embeddings - 1,
-                                    cache=trainer_config.train_datasets_cache)
-    test_dataset = FacebookDataset(trainer_config.test_datasets, vocab, transformer.n_pos_embeddings - 1,
-                                   cache=trainer_config.test_datasets_cache)
+    train_dataset = FacebookDataset(trainer_config.train_datasets, vocab, max_lengths=(transformer.n_pos_embeddings - 1) // (3 if trainer_config.single_input else 1),  # A bit restrictive here
+                                    dialog_embeddings=trainer_config.dialog_embeddings, cache=trainer_config.train_datasets_cache)
+    test_dataset = FacebookDataset(trainer_config.test_datasets, vocab, max_lengths=(transformer.n_pos_embeddings - 1) // (3 if trainer_config.single_input else 1),  # A bit restrictive here
+                                   dialog_embeddings=trainer_config.dialog_embeddings, cache=trainer_config.test_datasets_cache)
 
     model_trainer = Trainer(transformer,
                             train_dataset,
                             test_dataset,
                             batch_size=trainer_config.batch_size,
-                            batch_split=trainer_config.batch_split, 
-                            lr=trainer_config.lr, 
-                            lr_warmup=trainer_config.lr_warmup, 
+                            batch_split=trainer_config.batch_split,
+                            lr=trainer_config.lr,
+                            lr_warmup=trainer_config.lr_warmup,
                             lm_weight=trainer_config.lm_weight,
-                            risk_weight=trainer_config.risk_weight, 
-                            n_jobs=trainer_config.n_jobs, 
-                            clip_grad=trainer_config.clip_grad, 
+                            risk_weight=trainer_config.risk_weight,
+                            hits_weight=trainer_config.hits_weight,
+                            negative_samples=trainer_config.negative_samples,
+                            single_input=trainer_config.single_input,
+                            n_jobs=trainer_config.n_jobs,
+                            clip_grad=trainer_config.clip_grad,
                             device=device,
                             ignore_idxs=vocab.special_tokens_ids,
                             local_rank=args.local_rank,

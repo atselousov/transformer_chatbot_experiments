@@ -44,6 +44,8 @@ def set_seed(seed):
 def pad_sequence(sequences, batch_first=False, padding_value=0):
     # assuming trailing dimensions and type of all the Tensors
     # in sequences are same and fetching those from sequences[0]
+    if not len(sequences):
+        return []
     max_size = sequences[0].size()
     trailing_dims = max_size[1:]
     max_len = max([s.size(0) for s in sequences])
