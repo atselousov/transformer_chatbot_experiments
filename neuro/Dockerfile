@@ -1,26 +1,28 @@
-FROM pytorch/pytorch:0.4.1-cuda9-cudnn7-runtime
+FROM jpetazzo/dind
 
-RUN  apt-get update \
-  && apt-get install -y wget \
-  && apt-get install -y vim \
-  && apt-get install -y unzip \
-  && apt-get install -y default-jre \
-  && rm -rf /var/lib/apt/lists/*
+# Install req
+RUN apt-get update &&  \
+    apt-get -y install openssh-server wget curl rsync vim \
+    htop less libsm6 libxext6 libxrender-dev git && \
+    apt-get clean && \
+    rm /var/lib/apt/lists/*_*
+    # rm /var/lib/apt/lists/*_* -- to keep container small
+    # libsm6 libxext6 and libxrender-dev -- need for correct opencv
 
-RUN apt-get clean && apt-get update && apt-get install -y locales && locale-gen en_US.UTF-8
-ENV LANG en_US.UTF-8
-ENV LANGUAGE en_US:en
-ENV LC_ALL en_US.UTF-8
+RUN mkdir -p /var/run/sshd
+RUN mkdir -p /root/.ssh
+ADD id_rsa.pub /root/.ssh/id_rsa.pub
+RUN cat /root/.ssh/id_rsa.pub > /root/.ssh/authorized_keys
+RUN chmod 700 /root/.ssh/
+RUN chmod 600 /root/.ssh/authorized_keys
 
-WORKDIR /workspace
-
-COPY ./ ./
-
-RUN pip install -r requirements.txt
-RUN python -c "import nltk; nltk.download('wordnet'); nltk.download('averaged_perceptron_tagger'); nltk.download('vader_lexicon'); nltk.download('perluniprops')"
-RUN git clone https://github.com/facebookresearch/ParlAI.git && cd ParlAI && python setup.py develop
-RUN python -m spacy download en
+RUN echo "export PATH=$PATH" >> /etc/profile && \
+  echo "ldconfig" >> /etc/profile
 
 EXPOSE 9200
+EXPOSE 22
 
-ENTRYPOINT ["/bin/bash"]
+COPY entrypoint.sh /tmp/entrypoint.sh
+RUN chmod +x /tmp/entrypoint.sh
+
+ENTRYPOINT ["bash", "/tmp/entrypoint.sh"]
