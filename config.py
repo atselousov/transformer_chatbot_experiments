@@ -32,11 +32,12 @@ def get_model_config():
 
 
 def get_trainer_config():
-    config = AttrDict({'n_epochs': 100,
+    config = AttrDict({'n_epochs': 3,
                        'batch_size': 256,
                        'batch_split': 64,
                        'lr': 6.25e-5,
-                       'lr_warmup': 16000,
+                       'lr_warmup': 0.1,  # a fraction of total training (epoch * train_set_length) if linear_schedule == True
+                       's2s_weight': 1,
                        'lm_weight': 0.5,
                        'risk_weight': 0,
                        'hits_weight': 1,
@@ -75,7 +76,8 @@ def get_trainer_config():
                        'batch_size': 2,
                        'batch_split': 1,
                        'lr': 6.25e-5,
-                       'lr_warmup': 16000,
+                       'lr_warmup': 0.1,  # a fraction of total training (epoch * train_set_length) if linear_schedule == True
+                       's2s_weight': 1,
                        'lm_weight': 0.5,
                        'risk_weight': 0,
                        'hits_weight': 1,
