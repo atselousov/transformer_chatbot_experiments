@@ -32,10 +32,12 @@ except ImportError:
 class MultiheadAttention(nn.Module):
     @classmethod
     def _get_future_mask(cls, size, device):
-        if not hasattr(cls, '_future_mask') or cls._future_mask.device != device or cls._future_mask.shape < size:
-            cls._future_mask = torch.triu(torch.ones(size[0], size[1], dtype=torch.uint8, device=device), 1)
+        nd, ns = size
+        max_size = max(nd, ns)
+        if not hasattr(cls, '_future_mask') or cls._future_mask.device != device or any(s<max_size for s in cls._future_mask.shape):
+            cls._future_mask = torch.triu(torch.ones(max_size, max_size, dtype=torch.uint8, device=device), 1)
 
-        mask = cls._future_mask[:size[0], :size[1]]
+        mask = cls._future_mask[ns-nd:ns, :ns]  # future mask when we already may have past pre-computed values: take a slice at the end of the mask
 
         return mask
 
@@ -87,19 +89,25 @@ class MultiheadAttention(nn.Module):
 
         return x
 
-    def forward(self, query, key, value, padding_mask):
+    def forward(self, query, key, value, padding_mask, layer_past=None):
         qkv_same = (query.data_ptr() == key.data_ptr() == value.data_ptr())
         kv_same = (key.data_ptr() == value.data_ptr())
 
         if qkv_same:
             query, key, value = self.qkv_proj(query).split(self.n_features, dim=-1)
             apply_future_mask = True  # self-attention
+            if layer_past is not None:  # we have already computed part of this
+                past_key, past_value = layer_past[0].transpose(-2, -1), layer_past[1]  # transpose back cf below
+                key = torch.cat((past_key, key), dim=-1)
+                value = torch.cat((past_value, value), dim=-2)
+            present = torch.stack((key.transpose(-2, -1), value))  # transpose to have same shapes for stacking
         elif kv_same:
             q_w, q_b = self.qkv_proj.weight[:self.n_features, :], self.qkv_proj.bias[:self.n_features]
             query = F.linear(query, q_w, q_b)
             kv_w, kv_b = self.qkv_proj.weight[self.n_features:, :], self.qkv_proj.bias[self.n_features:]
             key, value = F.linear(key, kv_w, kv_b).split(self.n_features, dim=-1)
             apply_future_mask = False
+            present = None
         else:
             assert False
 
@@ -112,7 +120,7 @@ class MultiheadAttention(nn.Module):
 
         x = self.out_proj(x)
 
-        return x
+        return x, present
 
 
 class FeedForward(nn.Module):
@@ -151,16 +159,19 @@ class TransformerBlock(nn.Module):
         self.ff_norm = LayerNorm(n_features)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x, padding_mask, *contexts):
+    def forward(self, x, padding_mask, *contexts, layer_past=None):
         '''contexts = [(context1, padding_mask1), ...]'''
 
         inputs = (x, padding_mask) + contexts
 
         full_attn = 0
         n_attn = len(inputs) // 2
+        present = None
         for i in range(0, len(inputs), 2):
             c, m = inputs[i], inputs[i+1].byte()
-            a = self.attn(x, c, c, m)
+            a, tmp_present = self.attn(x, c, c, m, layer_past=layer_past)
+            if present is not None:
+                present = tmp_present
             full_attn += (a / n_attn)
 
         full_attn = self.dropout(full_attn)
@@ -170,7 +181,7 @@ class TransformerBlock(nn.Module):
         f = self.dropout(f)
         x = self.ff_norm(x + f)
 
-        return (x, padding_mask) + contexts
+        return (x, padding_mask) + contexts + (present,)
 
 
 class TransformerModule(nn.Module):
@@ -191,11 +202,17 @@ class TransformerModule(nn.Module):
         nn.init.normal_(self.embeddings.weight, std=0.02)
         nn.init.normal_(self.pos_embeddings.weight, std=0.02)
 
-    def forward(self, x, enc_contexts=[]):
+    def forward(self, x, enc_contexts=[], past=None):
         # x.dim() == 3 if we have additional dialog embeddings else x.dim() == 2
+        if past is None: # past store previously computed keys/values for the current generated sentence
+            past_length = 0
+            past = [None] * len(self.layers)
+        else:
+            past_length = past[0][0].size(-2)
+
         padding_mask = (x[:, :, 0] if x.dim() == 3 else x).eq(self.embeddings.padding_idx)
 
-        positions = torch.cumsum(~padding_mask, dim=-1, dtype=torch.long)
+        positions = torch.cumsum(~padding_mask, dim=-1, dtype=torch.long) + past_length
         positions.masked_fill_(padding_mask, self.pos_embeddings.padding_idx)
 
         x = self.embeddings(x)
@@ -212,8 +229,10 @@ class TransformerModule(nn.Module):
             out = checkpoint_sequential(self.layers, self.n_segments, x, padding_mask, *enc_contexts)
             x = out[0]
         else:
-            for layer in self.layers:
-                out = layer(x, padding_mask, *enc_contexts)
+            presents = []
+            for layer, layer_past in zip(self.layers, past):
+                out = layer(x, padding_mask, *enc_contexts, layer_past=layer_past)
                 x = out[0]
+                presents.append(out[-1])
 
-        return x, padding_mask
+        return x, padding_mask, presents

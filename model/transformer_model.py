@@ -86,7 +86,8 @@ class TransformerModel(nn.Module):
 
     def encode(self, x):
         " Returns a tuple(x, padding_mask)"
-        return self.transformer_module(x)
+        x, padding_mask, _ = self.transformer_module(x)
+        return x, padding_mask
 
     def generate(self, enc_x):
         return self.pre_softmax(enc_x)
@@ -95,11 +96,11 @@ class TransformerModel(nn.Module):
         return self.multiple_choice_head(x, padding_mask)
 
     def decode_classify(self, x, enc_contexts=[]):
-        x, padding_mask = self.transformer_module(x, enc_contexts)
+        x, padding_mask, _ = self.transformer_module(x, enc_contexts)
         return self.classify(x, padding_mask)
 
     def decode(self, x, enc_contexts=[]):
-        x, _ = self.transformer_module(x, enc_contexts)
+        x, _, _ = self.transformer_module(x, enc_contexts)
         return self.generate(x)
 
     def predict(self, contexts=[]):
@@ -138,8 +139,10 @@ class TransformerModel(nn.Module):
             group_size = self.beam_size // self.diversity_groups
             diversity_penalty = torch.zeros((batch_size, self.n_embeddings), device=device)
 
+            past = None
+
             for i in range(self.max_seq_len):
-                outputs, _ = self.transformer_module(prevs, beam_enc_contexts)
+                outputs, _, past = self.transformer_module(prevs, beam_enc_contexts, past=past)
 
                 logits = self.generate(outputs[:, -1, :])
                 log_probs = F.log_softmax(logits, dim=-1)
