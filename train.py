@@ -93,7 +93,8 @@ def main():
                                    diversity_groups=model_config.diversity_groups,
                                    multiple_choice_head=model_config.multiple_choice_head,
                                    single_input=trainer_config.single_input,
-                                   dialog_embeddings=trainer_config.dialog_embeddings)
+                                   dialog_embeddings=trainer_config.dialog_embeddings,
+                                   vocab=None)  # for beam search debugging
 
     if not trainer_config.load_last:
         load_openai_weights(transformer.transformer_module, 
@@ -163,6 +164,7 @@ def main():
 
     def sample_text_func(epoch):
         n_samples = 5
+        model_trainer.model.eval()
         samples_idxs = random.sample(range(len(test_dataset)), n_samples)
         samples = [test_dataset[idx] for idx in samples_idxs]
         for persona_info, dialog, target in samples:

@@ -216,7 +216,11 @@ class BPEVocab:
 
     @staticmethod
     def to_ids_list(list_obj):
-        # Take care of inputs with dialog embeddings (list of pairs, we keep only the first item in the pairs)
+        # Take care of inputs with dialog embeddings (list of pairs, we keep only the first item in the pairs) and single int inputs
+        if len(list_obj) == 0:
+            return []
+        if isinstance(list_obj, int):
+            return [list_obj]
         if isinstance(list_obj[0], int):
             return list_obj
         assert isinstance(list_obj[0][0], int)
