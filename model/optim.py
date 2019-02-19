@@ -16,7 +16,9 @@
 
 import math
 import torch
+import logging
 
+logger = logging.getLogger(__file__)
 
 class Adam(torch.optim.Optimizer):
     """Implements Adam algorithm.
@@ -126,7 +128,16 @@ class NoamOpt:
 
     def load_state_dict(self, state_dict):
         self._step = state_dict['step']
-        self.optimizer.load_state_dict(state_dict['optimizer'])
+        try:
+            self.optimizer.load_state_dict(state_dict['optimizer'])
+        except ValueError as e:
+            logger.info("Optimizer cannot be loaded from checkpoint: {}".format(e))
+
+    def backward(self, loss):
+        if self.fp16:
+            self.optimizer.backward(loss)
+        else:
+            loss.backward()
 
     def backward(self, loss):
         if self.fp16:
@@ -136,6 +147,9 @@ class NoamOpt:
 
     def zero_grad(self):
         return self.optimizer.zero_grad()
+
+    def get_lr(self):
+        return self.optimizer.param_groups[0]['lr']
 
     @property
     def param_groups(self):

@@ -68,8 +68,8 @@ class FacebookDataset(Dataset):
 
         return dataset
 
-    def __init__(self, paths, vocab, *, max_lengths=2048, min_infos=2, cache=None, augment=False,
-                 aug_syn_proba=0.1, aug_vary_length=True):
+    def __init__(self, paths, vocab, *, max_lengths=2048, min_infos=2, dialog_embeddings=False, 
+                 cache=None, augment=False, aug_syn_proba=0.1, aug_vary_length=True):
         assert min_infos > 0
 
         if isinstance(paths, str):
@@ -82,6 +82,7 @@ class FacebookDataset(Dataset):
         self.vocab = vocab
         self.max_lengths = max_lengths
         self.min_infos = min_infos
+        self.dialog_embeddings = dialog_embeddings
 
         if cache and os.path.exists(cache):
             self.data = torch.load(cache)
@@ -129,6 +130,8 @@ class FacebookDataset(Dataset):
             persona_info = self._augment(persona_info, info=True)
             persona_info = sum(persona_info, [])
             persona_info = [self.vocab.info_bos_id] + persona_info[:self.max_lengths-2] + [self.vocab.info_eos_id]
+            if self.dialog_embeddings:
+                persona_info = [[tok, persona_info[0]] for tok in persona_info]
 
         dialog = self._augment(dialog)
 
@@ -138,10 +141,14 @@ class FacebookDataset(Dataset):
                 ids = [self.vocab.talker1_bos_id] + ids + [self.vocab.talker1_eos_id]
             else:
                 ids = [self.vocab.talker2_bos_id] + ids + [self.vocab.talker2_eos_id]
+            if self.dialog_embeddings:
+                ids = [[tok, ids[0]] for tok in ids]
             h.extend(ids)
         h = h[-self.max_lengths:]
 
         y = [self.vocab.bos_id] + dialog[-1] + [self.vocab.eos_id]
         y = y[:self.max_lengths]
+        if self.dialog_embeddings:
+            y = [[tok, y[0]] for tok in y]
 
         return persona_info, h, y
