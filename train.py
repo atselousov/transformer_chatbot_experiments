@@ -53,6 +53,9 @@ def main():
     model_config = get_model_config()
     trainer_config = get_trainer_config()
 
+    logger.info("model config: {}".format(model_config))
+    logger.info("trainer config: {}".format(trainer_config))
+
     log_dir = writer.log_dir
     interrupt_checkpoint_path = os.path.join(log_dir, trainer_config.interrupt_checkpoint_path)
     last_checkpoint_path = os.path.join(log_dir, trainer_config.last_checkpoint_path)
