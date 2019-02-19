@@ -246,6 +246,7 @@ def get_syn(seq):
 
 
 def augment_replica(seq):
+    _exceptions = ['your', 'persona']
     pos2wn = {'NN': wordnet.NOUN,
               'JJ': wordnet.ADJ,
               'VBP': wordnet.VERB,
@@ -257,7 +258,7 @@ def augment_replica(seq):
     tagged_seq = nltk.pos_tag(nltk.word_tokenize(tagged_seq))
 
     for word, pos in tagged_seq:
-        if pos not in pos2wn:
+        if pos not in pos2wn or word in _exceptions:
             continue
 
         pos = pos2wn[pos]
