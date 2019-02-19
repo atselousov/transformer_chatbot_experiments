@@ -83,7 +83,7 @@ def get_trainer_config():
     local_config.device = 'cpu'
     local_config.load_last = './checkpoints/last_checkpoint'
     local_config.fp16 = False
-    local_config.single_input = False
-    local_config.dialog_embeddings = False
+    local_config.single_input = True
+    local_config.dialog_embeddings = True
 
     return config if torch.cuda.is_available() else local_config

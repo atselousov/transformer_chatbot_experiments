@@ -224,7 +224,7 @@ class TransformerModule(nn.Module):
         positions = torch.cumsum(~padding_mask, dim=-1, dtype=torch.long) + past_length
         positions.masked_fill_(padding_mask, self.pos_embeddings.padding_idx)
 
-        x = self.embeddings(x) * math.sqrt(self.embeddings.embedding_dim)  # !!! TODO(thom): remove, adding this to use last checkpoint
+        x = self.embeddings(x) # * math.sqrt(self.embeddings.embedding_dim)  # Adding this to use pretrained last checkpoint
         if x.dim() == 4: # additional dialog embeddings
             x = x.sum(dim=-2)
         x = x + self.pos_embeddings(positions) # x * math.sqrt(self.embeddings.embedding_dim) + self.pos_embeddings(positions)
