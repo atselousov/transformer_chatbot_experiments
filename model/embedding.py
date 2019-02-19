@@ -14,7 +14,7 @@ class BaseEmbedding(nn.Module):
     def __init__(self, *, embedding_dim=None, padding_idx=None, **kwargs):
         super(BaseEmbedding, self).__init__()
 
-        assert embedding_dim is not None and padding_idx is not None
+        assert embedding_dim is not None
 
         self._embedding_dim = embedding_dim
         self._padding_idx = padding_idx
@@ -23,7 +23,7 @@ class BaseEmbedding(nn.Module):
     def _init_model(self, **kwargs):
         raise NotImplementedError
 
-    def forward(self, *args):
+    def forward(self, *args, **kwargs):
         raise NotImplementedError
 
 
@@ -57,7 +57,7 @@ class ConstantPositionalEmbedding(PositionalEmbedding):
 
         return emb
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         batch_size, seq_len = x.size()
 
         if self._position_embedding is None or seq_len >= self._position_embedding.size(0):
@@ -77,7 +77,7 @@ class LearnablePositionalEmbedding(PositionalEmbedding):
                                                 self._padding_idx)
         nn.init.normal_(self._position_embedding.weight, std=0.02)
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         _, seq_len = x.size()
         assert seq_len <= self._n_positions
         positions = self._get_positions(x)
@@ -93,16 +93,19 @@ class DefaultEmbedding(BaseEmbedding):
                                        self._padding_idx)
         nn.init.normal_(self._embedding.weight, std=0.02)
 
-    def forward(self, x):
-        return self._embedding(x) * math.sqrt(self._embedding.embedding_dim)
+    def forward(self, x, *, personality=None, **kwargs):
+        res = self._embedding(x) * math.sqrt(self._embedding.embedding_dim)
+        if personality is not None:
+            res += self._embedding(personality)
+
+        return res
 
 
 class EmbeddingDict(nn.Module):
     def __init__(self, *modules, **kwargs):
         super(EmbeddingDict, self).__init__()
 
-        # assert all([m in __all__ for m in modules])
-
+        self._padding_idx = kwargs.get('padding_idx', None)
         self._embeddings = nn.ModuleDict({module: eval(module)(**kwargs) for module in modules})
 
     def __getitem__(self, name):
@@ -110,10 +113,14 @@ class EmbeddingDict(nn.Module):
 
         return self._embeddings[name]
 
-    def forward(self, x):
+    @property
+    def padding_idx(self):
+        return self._padding_idx
+
+    def forward(self, x, **kwargs):
         out = 0
         for embedding in self._embeddings.values():
-            out += embedding(x)
+            out += embedding(x, **kwargs)
 
         return out
 
@@ -126,4 +133,5 @@ if __name__ == '__main__':
 
     x = torch.randint(0, 128, (8, 256))
 
-    assert embedding(x).size() == (8, 256, 768)
+    assert embedding(x, personality=x).size() == (8, 256, 768)
+    assert embedding.padding_idx == 0

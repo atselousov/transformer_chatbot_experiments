@@ -191,16 +191,16 @@ class TransformerModule(nn.Module):
         self.layers = nn.ModuleList([TransformerBlock(embeddings_size, n_heads, dropout, attn_dropout, ff_dropout) for _ in range(n_layers)])
         self.n_segments = n_segments
 
-        self.padding_idx = padding_idx
-
     def forward(self, x, enc_contexts=[]):
         # x.dim() == 3 if we have additional dialog embeddings else x.dim() == 2
-        padding_mask = (x[:, :, 0] if x.dim() == 3 else x).eq(self.padding_idx)
-
+        kwargs = {}
         if x.dim() == 3:
-            x = self.embedding(x[:, :, 0]) + self.embedding['DefaultEmbedding'](x[:, :, 1])
-        else:
-            x = self.embedding(x)
+            kwargs['personality'] = x[:, :, 1]
+            x = x[:, :, 0]
+
+        padding_mask = x.eq(self.embedding.padding_idx)
+
+        x = self.embedding(x, **kwargs)
         x = self.embed_dropout(x)
 
         enc_contexts = sum(enc_contexts, ())
