@@ -162,7 +162,7 @@ class Trainer:
 
         return contexts, y_out, distractors
 
-    def _eval_train(self, epoch, risk_func=None):
+    def _eval_train(self, epoch, risk_func=None): # add ppl and hits@1 evaluations
         self.model.train()
 
         tqdm_data = tqdm(self.train_dataloader, desc='Train (epoch #{})'.format(epoch))
