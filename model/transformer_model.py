@@ -51,7 +51,8 @@ class TransformerModel(nn.Module):
                  padding_idx, n_heads, dropout, embed_dropout, attn_dropout, ff_dropout,
                  bos_id, eos_id, max_seq_len=256, beam_size=5, sample=False,
                  length_penalty=0.8, annealing_topk=None, annealing=0, 
-                 diversity_coef=0, diversity_groups=1, n_segments=None, multiple_choice_head=False):
+                 diversity_coef=0, diversity_groups=1, n_segments=None, multiple_choice_head=False,
+                 single_input=False):
 
         super(TransformerModel, self).__init__()
 
@@ -71,6 +72,7 @@ class TransformerModel(nn.Module):
         self.annealing_topk = annealing_topk
         self.diversity_coef = diversity_coef
         self.diversity_groups = diversity_groups
+        self.single_input = single_input
 
         self.transformer_module = TransformerModule(n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
                                                     padding_idx, n_heads, dropout, embed_dropout, attn_dropout,
@@ -104,8 +106,13 @@ class TransformerModel(nn.Module):
         return self.generate(x)
 
     def predict(self, contexts=[]):
-        enc_contexts = [self.encode(c) for c in contexts]
-        prediction = self.beam_search(enc_contexts)
+        if self.single_input:
+            enc_contexts = []
+            beam_starts = contexts
+        else:
+            enc_contexts = [self.encode(c) for c in contexts]
+            beam_starts = None
+        prediction = self.beam_search(enc_contexts=enc_contexts, beam_starts=beam_starts)
 
         return prediction
 
@@ -113,16 +120,16 @@ class TransformerModel(nn.Module):
         """https://arxiv.org/abs/1609.08144"""
         return (5 + sequence_lengths) ** self.length_penalty_coef / (5 + 1) ** self.length_penalty_coef
 
-    def beam_search(self, enc_contexts=[], return_beams=False):
+    def beam_search(self, enc_contexts=[], return_beams=False, beam_starts=None):
         with torch.no_grad():
-            if len(enc_contexts) == 0:
+            if len(enc_contexts) == 0 and not beam_starts:
                 return []
 
             batch_size = enc_contexts[0][0].shape[0]
             device = next(self.parameters()).device
 
-            prevs = torch.full((batch_size * self.beam_size, 1), fill_value=self.bos_id, dtype=torch.long, device=device)
-            
+            prevs = beam_starts if beam_starts else torch.full((batch_size * self.beam_size, 1), fill_value=self.bos_id, dtype=torch.long, device=device)
+
             beam_scores = torch.zeros(batch_size, self.beam_size, device=device)
             beam_lens = torch.ones(batch_size, self.beam_size, dtype=torch.long, device=device)
             is_end = torch.zeros(batch_size, self.beam_size, dtype=torch.uint8, device=device)
@@ -138,11 +145,10 @@ class TransformerModel(nn.Module):
             current_sample_prob = 1
             group_size = self.beam_size // self.diversity_groups
             diversity_penalty = torch.zeros((batch_size, self.n_embeddings), device=device)
-
             past = None
 
             for i in range(self.max_seq_len):
-                outputs, _, past = self.transformer_module(prevs, beam_enc_contexts, past=past)
+                outputs, _, past = self.transformer_module(prevs if past is None else prevs[:, -1], beam_enc_contexts, past=past)
 
                 logits = self.generate(outputs[:, -1, :])
                 log_probs = F.log_softmax(logits, dim=-1)
