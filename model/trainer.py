@@ -21,7 +21,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, DistributedSampler, RandomSampler
+import random
+import logging
+from torch.utils.data import DataLoader, RandomSampler, DistributedSampler
 from tqdm import tqdm
 
 from .loss import LabelSmoothingLoss
@@ -79,7 +81,7 @@ class Trainer:
                 base_optimizer = FP16_Optimizer(base_optimizer, dynamic_loss_scale=True)
             else:
                 base_optimizer = FP16_Optimizer(base_optimizer, static_loss_scale=loss_scale)
-        if linear_schedule:
+        if not linear_schedule:
             self.optimizer = NoamOpt(self.model.embeddings_size, 1, lr_warmup, base_optimizer, linear_schedule=False, fp16=fp16)
         else:
             total_steps = len(train_dataset) * n_epochs
@@ -235,6 +237,7 @@ class Trainer:
                          + self.hits_weight * batch_hits_loss
                          + batch_loss) / self.batch_split
             self.optimizer.backward(full_loss)
+
             if (i + 1) % self.batch_split == 0:
                 if self.clip_grad is not None:
                     for group in self.optimizer.param_groups:

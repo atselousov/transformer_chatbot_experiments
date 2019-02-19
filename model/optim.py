@@ -139,6 +139,12 @@ class NoamOpt:
         else:
             loss.backward()
 
+    def backward(self, loss):
+        if self.fp16:
+            self.optimizer.backward(loss)
+        else:
+            loss.backward()
+
     def zero_grad(self):
         return self.optimizer.zero_grad()
 
