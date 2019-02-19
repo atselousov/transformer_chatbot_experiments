@@ -85,7 +85,7 @@ class Trainer:
         if not linear_schedule:
             self.optimizer = NoamOpt(self.model.embeddings_size, 1, lr_warmup, base_optimizer, linear_schedule=False, fp16=fp16)
         else:
-            total_steps = len(train_dataset) * n_epochs
+            total_steps = len(train_dataset) * n_epochs // batch_size
             if local_rank != -1:
                 total_steps = total_steps // torch.distributed.get_world_size()
             self.optimizer = NoamOpt(self.model.embeddings_size, 1, lr_warmup, base_optimizer, linear_schedule=True,
