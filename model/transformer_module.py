@@ -97,10 +97,10 @@ class MultiheadAttention(nn.Module):
             query, key, value = self.qkv_proj(query).split(self.n_features, dim=-1)
             apply_future_mask = True  # self-attention
             if layer_past is not None:  # we have already computed part of this
-                past_key, past_value = layer_past[0].transpose(-2, -1), layer_past[1]  # transpose back cf below
-                key = torch.cat((past_key, key), dim=-1)
+                past_key, past_value = layer_past[0], layer_past[1]  # transpose back cf below
+                key = torch.cat((past_key, key), dim=-2)
                 value = torch.cat((past_value, value), dim=-2)
-            present = torch.stack((key.transpose(-2, -1), value))  # transpose to have same shapes for stacking
+            present = torch.stack((key, value))  # transpose to have same shapes for stacking
         elif kv_same:
             q_w, q_b = self.qkv_proj.weight[:self.n_features, :], self.qkv_proj.bias[:self.n_features]
             query = F.linear(query, q_w, q_b)
@@ -170,7 +170,7 @@ class TransformerBlock(nn.Module):
         for i in range(0, len(inputs), 2):
             c, m = inputs[i], inputs[i+1].byte()
             a, tmp_present = self.attn(x, c, c, m, layer_past=layer_past)
-            if present is not None:
+            if tmp_present is not None:
                 present = tmp_present
             full_attn += (a / n_attn)
 

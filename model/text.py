@@ -43,6 +43,10 @@ class BPEVocab:
     talker1_eos = '</t1>'
     talker2_bos = '<t2>'
     talker2_eos = '</t2>'
+    sent_dialog_token = '<s>'
+    info_dialog_token = '<i>'
+    talker1_dialog_token = '<t1>'
+    talker2_dialog_token = '<t2>'
 
     @staticmethod
     def from_files(vocab_path, codes_path, *args, **kwargs):
@@ -125,6 +129,22 @@ class BPEVocab:
     @property
     def talker2_eos_id(self):
         return self.token2id[BPEVocab.talker2_eos]
+
+    @property
+    def sent_dialog_id(self):
+        return self.token2id[BPEVocab.sent_dialog_token]
+
+    @property
+    def info_dialog_id(self):
+        return self.token2id[BPEVocab.info_dialog_token]
+
+    @property
+    def talker1_dialog_id(self):
+        return self.token2id[BPEVocab.talker1_dialog_token]
+
+    @property
+    def talker2_dialog_id(self):
+        return self.token2id[BPEVocab.talker2_dialog_token]
 
     def get_prefix2words(self, convai_dict, smoothing_freq=5):
         # map BPE-prefix => dict(full_words beginning with BPE-prefix, associated words_counts)

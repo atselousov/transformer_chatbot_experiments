@@ -49,20 +49,21 @@ class MultipleChoiceHead(nn.Module):
 class TransformerModel(nn.Module):
     def __init__(self, n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
                  padding_idx, n_heads, dropout, embed_dropout, attn_dropout, ff_dropout,
-                 bos_id, eos_id, max_seq_len=256, beam_size=5, sample=False,
+                 bos_id, eos_id, sent_dialog_id, max_seq_len=256, beam_size=5, sample=False,
                  length_penalty=0.8, annealing_topk=None, annealing=0, 
                  diversity_coef=0, diversity_groups=1, n_segments=None, multiple_choice_head=False,
-                 single_input=False):
+                 single_input=False, dialog_embeddings=False):
 
         super(TransformerModel, self).__init__()
 
-        self.padding_idx = padding_idx
         self.n_embeddings = n_embeddings
         self.n_pos_embeddings = n_pos_embeddings
         self.embeddings_size = embeddings_size
 
         self.bos_id = bos_id
+        self.padding_idx = padding_idx
         self.eos_id = eos_id
+        self.sent_dialog_id = sent_dialog_id
 
         self.max_seq_len = max_seq_len
         self.beam_size = beam_size
@@ -72,7 +73,9 @@ class TransformerModel(nn.Module):
         self.annealing_topk = annealing_topk
         self.diversity_coef = diversity_coef
         self.diversity_groups = diversity_groups
+
         self.single_input = single_input
+        self.dialog_embeddings = dialog_embeddings
 
         self.transformer_module = TransformerModule(n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
                                                     padding_idx, n_heads, dropout, embed_dropout, attn_dropout,
@@ -108,7 +111,7 @@ class TransformerModel(nn.Module):
     def predict(self, contexts=[]):
         if self.single_input:
             enc_contexts = []
-            beam_starts = contexts
+            beam_starts = torch.cat(contexts, dim=1)
         else:
             enc_contexts = [self.encode(c) for c in contexts]
             beam_starts = None
@@ -122,13 +125,15 @@ class TransformerModel(nn.Module):
 
     def beam_search(self, enc_contexts=[], return_beams=False, beam_starts=None):
         with torch.no_grad():
-            if len(enc_contexts) == 0 and not beam_starts:
+            if len(enc_contexts) == 0 and beam_starts is None:
                 return []
 
-            batch_size = enc_contexts[0][0].shape[0]
+            batch_size = enc_contexts[0][0].shape[0] if beam_starts is None else beam_starts.shape[0]
             device = next(self.parameters()).device
 
-            prevs = beam_starts if beam_starts else torch.full((batch_size * self.beam_size, 1), fill_value=self.bos_id, dtype=torch.long, device=device)
+            prevs = beam_starts if beam_starts is not None else torch.full((batch_size, 1), fill_value=self.bos_id, dtype=torch.long, device=device)
+            prevs = prevs.unsqueeze(1).repeat(1, self.beam_size, 1, 1)
+            prevs = prevs.view(-1, prevs.shape[2], prevs.shape[3])
 
             beam_scores = torch.zeros(batch_size, self.beam_size, device=device)
             beam_lens = torch.ones(batch_size, self.beam_size, dtype=torch.long, device=device)
@@ -148,7 +153,10 @@ class TransformerModel(nn.Module):
             past = None
 
             for i in range(self.max_seq_len):
-                outputs, _, past = self.transformer_module(prevs if past is None else prevs[:, -1], beam_enc_contexts, past=past)
+                inputs = prevs if past is None else prevs[:, -1:, ...]  # only use the last token (rest is in past)
+                if self.dialog_embeddings and inputs.dim() < 3:
+                    inputs = torch.stack((inputs, torch.full_like(inputs, self.sent_dialog_id)), dim=inputs.dim())
+                outputs, _, past = self.transformer_module(inputs, beam_enc_contexts, past=past)
 
                 logits = self.generate(outputs[:, -1, :])
                 log_probs = F.log_softmax(logits, dim=-1)
