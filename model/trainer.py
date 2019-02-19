@@ -105,6 +105,7 @@ class Trainer:
         self.writer = writer
 
         self.batch_split = batch_split
+        self.batch_size = batch_size
         self.s2s_weight = s2s_weight
         self.lm_weight = lm_weight
         self.risk_weight = risk_weight
@@ -249,21 +250,21 @@ class Trainer:
                 self.optimizer.step()
                 self.optimizer.zero_grad()
 
-            lm_loss = (i * lm_loss + batch_lm_loss.item()) / (i + 1)
-            s2s_loss = (i * s2s_loss + batch_s2s_loss.item()) / (i + 1)
-            risk_loss = (i * risk_loss + batch_risk_loss.item()) / (i + 1)
-            hits_loss = (i * hits_loss + batch_hits_loss.item()) / (i + 1)
+                lm_loss = (i * lm_loss + batch_lm_loss.item()) / (i + 1)
+                s2s_loss = (i * s2s_loss + batch_s2s_loss.item()) / (i + 1)
+                risk_loss = (i * risk_loss + batch_risk_loss.item()) / (i + 1)
+                hits_loss = (i * hits_loss + batch_hits_loss.item()) / (i + 1)
 
-            tqdm_data.set_postfix({'lm_loss': lm_loss, 's2s_loss': s2s_loss, 'risk_loss': risk_loss, 'hits_loss': hits_loss})
+                tqdm_data.set_postfix({'lm_loss': lm_loss, 's2s_loss': s2s_loss, 'risk_loss': risk_loss, 'hits_loss': hits_loss})
 
-            # logging
-            global_step = epoch * len(self.train_dataloader) + i
-            self.writer.add_scalar("losses/batch_lm_loss", batch_lm_loss.item(), global_step=global_step)
-            self.writer.add_scalar("losses/batch_risk_loss", batch_risk_loss.item(), global_step=global_step)
-            self.writer.add_scalar("losses/batch_hits_loss", batch_hits_loss.item(), global_step=global_step)
-            self.writer.add_scalar("losses/batch_s2s_loss", batch_s2s_loss.item(), global_step=global_step)
-            self.writer.add_scalar("losses/full_loss", full_loss.item(), global_step=global_step)
-            self.writer.add_scalar("training/lr", self.optimizer.get_lr(), global_step=global_step)
+                # logging
+                global_step = epoch * len(self.train_dataloader) // self.batch_size + (i + 1) // self.batch_split
+                self.writer.add_scalar("losses/batch_lm_loss", batch_lm_loss.item(), global_step=global_step)
+                self.writer.add_scalar("losses/batch_risk_loss", batch_risk_loss.item(), global_step=global_step)
+                self.writer.add_scalar("losses/batch_hits_loss", batch_hits_loss.item(), global_step=global_step)
+                self.writer.add_scalar("losses/batch_s2s_loss", batch_s2s_loss.item(), global_step=global_step)
+                self.writer.add_scalar("losses/full_loss", full_loss.item(), global_step=global_step)
+                self.writer.add_scalar("training/lr", self.optimizer.get_lr(), global_step=global_step)
 
 
     def _eval_test(self, metric_funcs={}, external_metrics_func=None):
