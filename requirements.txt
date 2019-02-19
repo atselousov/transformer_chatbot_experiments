@@ -11,4 +11,5 @@ language-check>=1.1
 attrdict
 ptvsd
 tensorboardX
+tensorflow
 gitpython
