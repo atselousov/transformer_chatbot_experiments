@@ -258,7 +258,7 @@ class Trainer:
                 tqdm_data.set_postfix({'lm_loss': lm_loss, 's2s_loss': s2s_loss, 'risk_loss': risk_loss, 'hits_loss': hits_loss})
 
                 # logging
-                global_step = epoch * len(self.train_dataloader) // self.batch_size + (i + 1) // self.batch_split
+                global_step = (epoch * len(self.train_dataloader) + (i + 1)) // self.batch_split
                 self.writer.add_scalar("losses/batch_lm_loss", batch_lm_loss.item(), global_step=global_step)
                 self.writer.add_scalar("losses/batch_risk_loss", batch_risk_loss.item(), global_step=global_step)
                 self.writer.add_scalar("losses/batch_hits_loss", batch_hits_loss.item(), global_step=global_step)
