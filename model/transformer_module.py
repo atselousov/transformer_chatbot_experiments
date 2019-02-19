@@ -16,10 +16,18 @@
 
 import math
 import torch
+import logging
 import torch.nn as nn
 import torch.nn.functional as F
 from .utils import checkpoint_sequential
 
+logger = logging.getLogger(__file__)
+
+try:
+    from apex.normalization.fused_layer_norm import FusedLayerNorm as LayerNorm
+except ImportError:
+    print("Better speed can be achieved with apex installed from https://www.github.com/nvidia/apex.")
+    from torch.nn import LayerNorm
 
 class MultiheadAttention(nn.Module):
     @classmethod
@@ -59,7 +67,7 @@ class MultiheadAttention(nn.Module):
         if apply_future_mask:
             future_mask = MultiheadAttention._get_future_mask(w.shape[-2:], w.device).unsqueeze(0).unsqueeze(0)
             w.masked_fill_(future_mask, float('-inf'))
-        
+
         if padding_mask is not None:
             w.masked_fill_(padding_mask.unsqueeze(1).unsqueeze(2), float('-inf'))
 
@@ -138,9 +146,9 @@ class TransformerBlock(nn.Module):
         super(TransformerBlock, self).__init__()
 
         self.attn = MultiheadAttention(n_features, n_heads, attn_dropout)
-        self.attn_norm = nn.LayerNorm(n_features)
+        self.attn_norm = LayerNorm(n_features)
         self.ff = FeedForward(n_features, 4 * n_features, ff_dropout)
-        self.ff_norm = nn.LayerNorm(n_features)
+        self.ff_norm = LayerNorm(n_features)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, padding_mask, *contexts):
@@ -184,12 +192,16 @@ class TransformerModule(nn.Module):
         nn.init.normal_(self.pos_embeddings.weight, std=0.02)
 
     def forward(self, x, enc_contexts=[]):
-        padding_mask = x.eq(self.embeddings.padding_idx)
+        # x.dim() == 3 if we have additional dialog embeddings else x.dim() == 2
+        padding_mask = (x[:, :, 0] if x.dim() == 3 else x).eq(self.embeddings.padding_idx)
 
         positions = torch.cumsum(~padding_mask, dim=-1, dtype=torch.long)
         positions.masked_fill_(padding_mask, self.pos_embeddings.padding_idx)
-        
-        x = self.embeddings(x) * math.sqrt(self.embeddings.embedding_dim) + self.pos_embeddings(positions)
+
+        x = self.embeddings(x)
+        if x.dim() == 4: # additional dialog embeddings
+            x = x.sum(dim=-2)
+        x = x + self.pos_embeddings(positions) # x * math.sqrt(self.embeddings.embedding_dim) + self.pos_embeddings(positions)
         x = self.embed_dropout(x)
 
         enc_contexts = sum(enc_contexts, ())
@@ -203,5 +215,5 @@ class TransformerModule(nn.Module):
             for layer in self.layers:
                 out = layer(x, padding_mask, *enc_contexts)
                 x = out[0]
-        
+
         return x, padding_mask

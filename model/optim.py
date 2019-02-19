@@ -16,7 +16,9 @@
 
 import math
 import torch
+import logging
 
+logger = logging.getLogger(__file__)
 
 class Adam(torch.optim.Optimizer):
     """Implements Adam algorithm.
@@ -108,11 +110,15 @@ class Adam(torch.optim.Optimizer):
 
 
 class NoamOpt:
-    def __init__(self, embeddings_size, factor, warmup, optimizer):
+    def __init__(self, embeddings_size, factor, warmup, optimizer, linear_schedule=False, lr=None, total_steps=None, fp16=False):
         self.embeddings_size = embeddings_size
         self.factor = factor
         self.warmup = warmup
         self.optimizer = optimizer
+        self.linear_schedule = linear_schedule
+        self.fp16 = fp16
+        self.lr = lr
+        self.total_steps = total_steps
 
         self._step = 0
         
@@ -122,7 +128,22 @@ class NoamOpt:
 
     def load_state_dict(self, state_dict):
         self._step = state_dict['step']
-        self.optimizer.load_state_dict(state_dict['optimizer'])
+        try:
+            self.optimizer.load_state_dict(state_dict['optimizer'])
+        except ValueError as e:
+            logger.info("Optimizer cannot be loaded from checkpoint: {}".format(e))
+
+    def backward(self, loss):
+        if self.fp16:
+            self.optimizer.backward(loss)
+        else:
+            loss.backward()
+
+    def backward(self, loss):
+        if self.fp16:
+            self.optimizer.backward(loss)
+        else:
+            loss.backward()
 
     def zero_grad(self):
         return self.optimizer.zero_grad()
@@ -136,7 +157,7 @@ class NoamOpt:
 
     def step(self):
         self._step += 1
-        rate = self.rate()
+        rate = self.rate_linear() if self.linear_schedule else self.rate()
         for p in self.optimizer.param_groups:
             p['lr'] = rate
         self.optimizer.step()
@@ -146,3 +167,17 @@ class NoamOpt:
             step = self._step
             
         return self.factor * (self.embeddings_size ** (-0.5) * min(step ** (-0.5), step * self.warmup ** (-1.5)))
+
+    @staticmethod
+    def warmup_linear(x, warmup=0.002):
+        if x < warmup:
+            return x/warmup
+        return 1.0 - x
+
+    def rate_linear(self, step=None):
+        if step is None:
+            step = self._step
+        assert self.lr is not None and self.total_steps is not None
+
+        return self.lr * self.warmup_linear(step/self.total_steps, self.warmup)
+    
