@@ -138,10 +138,11 @@ class FacebookDataset(Dataset):
             return []
         if self.negative_samples == -1:  # => include all candidates in data instance
             return candidates
-        distractors = sum((random.sample(candidates, k=self.negative_samples) for candidates in batch_candidates), [])
-        if not distractors:  # nothing in candidates, sample from train dataset (we may sample the gold y but quite unlikely)
+        if len(candidates) >= self.negative_samples:
+            distractors = random.sample(candidates, k=self.negative_samples)
+        else:  # not enought candidates, sample from train dataset instead (we may sample the gold y but quite unlikely)
             distractors = random.sample(range(len(self.data)), k=self.negative_samples)
-            distractors = [self.data[ids][-1] for ids in distractors]
+            distractors = [self.data[ids][1][-1] for ids in distractors]
         return distractors
 
     def __getitem__(self, idx):
