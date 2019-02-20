@@ -68,8 +68,10 @@ class Trainer:
             ]
 
         try:
-            from apex.optimizers import FusedAdam
-            base_optimizer = FusedAdam(optimizer_grouped_parameters, lr=lr, bias_correction=False, max_grad_norm=1.0)
+            # TODO (truskovskiyk 20.02.2019 FusedAdam raises nan errors for me)
+            # from apex.optimizers import FusedAdam
+            # base_optimizer = FusedAdam(optimizer_grouped_parameters, lr=lr, bias_correction=False, max_grad_norm=1.0)
+            base_optimizer = Adam(optimizer_grouped_parameters, lr=lr)
         except ImportError:
             logger.info("Apex not found, not using FusedAdam.")
             base_optimizer = Adam(optimizer_grouped_parameters, lr=lr)
@@ -192,7 +194,7 @@ class Trainer:
             nexts = targets[:, 1:].contiguous() if targets.dim() == 2 else targets[:, 1:, 0].contiguous()
             if self.hits_weight > 0 and self.negative_samples > 0:
                 # Keep the hidden states for hits@1 loss
-                hidden_state, padding_mask = self.model.transformer_module(targets, enc_contexts)
+                hidden_state, padding_mask, _ = self.model.transformer_module(targets, enc_contexts)
                 outputs = self.model.generate(hidden_state[:, :-1].contiguous())
             else:
                 outputs = self.model.decode(targets[:, :-1].contiguous(), enc_contexts)
