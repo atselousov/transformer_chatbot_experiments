@@ -224,6 +224,8 @@ class TransformerModule(nn.Module):
 
         positions = torch.cumsum(~padding_mask, dim=-1, dtype=torch.long) + past_length
         positions.masked_fill_(padding_mask, self.pos_embeddings.padding_idx)
+        if torch.max(positions) >= self.pos_embeddings.num_embeddings:
+            raise ValueError
 
         x = self.embeddings(x)
         if x.dim() == 4: # additional dialog embeddings

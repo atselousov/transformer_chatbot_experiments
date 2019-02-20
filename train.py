@@ -175,7 +175,7 @@ def main():
         for persona_info, dialog, target, _ in samples:
             contexts = [torch.tensor([c], dtype=torch.long, device=model_trainer.device) for c in [persona_info, dialog] if len(c) > 0]
             prediction = model_trainer.model.predict(contexts)[0]
-            
+
             persona_info_str = vocab.ids2string(persona_info[1:-1])
             dialog_str = vocab.ids2string(dialog)
             dialog_str = dialog_str.replace(vocab.talker1_bos, '\n\t- ').replace(vocab.talker2_bos, '\n\t- ')

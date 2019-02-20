@@ -152,6 +152,9 @@ class Trainer:
         y_out = pad_sequence(y_out, batch_first=True, padding_value=self.model.padding_idx)
         distractors = pad_sequence(distractors, batch_first=True, padding_value=self.model.padding_idx)
 
+        if distractors.shape[1] > 512:
+            raise ValueError
+
         return contexts, y_out, distractors
 
     def _eval_train(self, epoch, risk_func=None): # add ppl and hits@1 evaluations
