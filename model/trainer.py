@@ -15,30 +15,29 @@
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import logging
+import math
 import random
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import random
-import logging
-from torch.utils.data import DataLoader, RandomSampler, DistributedSampler
+from torch.utils.data import DataLoader, DistributedSampler, RandomSampler
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
 
 from .loss import LabelSmoothingLoss
 from .optim import Adam, NoamOpt
-from .utils import pad_sequence
+from .utils import pad_sequence, repeat_along_dim1
 
 logger = logging.getLogger(__file__)
 
 class Trainer:
-    def __init__(self, model, train_dataset, writer=SummaryWriter(), test_dataset=None, batch_size=8,
+    def __init__(self, model, train_dataset, writer=SummaryWriter(), test_dataset=None, train_batch_size=8, test_batch_size=8,
                  batch_split=1, s2s_weight=1, lm_weight=0.5, risk_weight=0, hits_weight=0, lr=6.25e-5, lr_warmup=2000, 
                  n_jobs=0, clip_grad=None, label_smoothing=0, device=torch.device('cuda'), weight_decay=0.1,
                  ignore_idxs=[], local_rank=-1, fp16=False, loss_scale=0,
-                 linear_schedule=False, n_epochs=0, negative_samples=0, single_input=False):
+                 linear_schedule=False, n_epochs=0, single_input=False):
         if local_rank != -1:
             torch.cuda.set_device(local_rank)
             device = torch.device("cuda", local_rank)
@@ -85,7 +84,7 @@ class Trainer:
         if not linear_schedule:
             self.optimizer = NoamOpt(self.model.embeddings_size, 1, lr_warmup, base_optimizer, linear_schedule=False, fp16=fp16)
         else:
-            total_steps = len(train_dataset) * n_epochs // batch_size
+            total_steps = len(train_dataset) * n_epochs // train_batch_size
             if local_rank != -1:
                 total_steps = total_steps // torch.distributed.get_world_size()
             self.optimizer = NoamOpt(self.model.embeddings_size, 1, lr_warmup, base_optimizer, linear_schedule=True,
@@ -95,17 +94,16 @@ class Trainer:
             train_sampler = RandomSampler(train_dataset)
         else:
             train_sampler = DistributedSampler(train_dataset)
-        self.train_dataloader = DataLoader(train_dataset, batch_size=batch_size//batch_split, sampler=train_sampler, 
+        self.train_dataloader = DataLoader(train_dataset, batch_size=train_batch_size//batch_split, sampler=train_sampler, 
                                            num_workers=n_jobs, collate_fn=self.collate_func)
         self.train_dataset = train_dataset  # used to sample negative examples
         if test_dataset is not None and local_rank in [-1, 0]:  # only do evaluation on main process
-            self.test_dataloader = DataLoader(test_dataset, batch_size=batch_size//batch_split, shuffle=False, 
-                                            num_workers=n_jobs, collate_fn=self.collate_func)
+            self.test_dataloader = DataLoader(test_dataset, batch_size=test_batch_size, shuffle=False, 
+                                              num_workers=n_jobs, collate_fn=self.collate_func)
         self.vocab = train_dataset.vocab
         self.writer = writer
 
         self.batch_split = batch_split
-        self.batch_size = batch_size
         self.s2s_weight = s2s_weight
         self.lm_weight = lm_weight
         self.risk_weight = risk_weight
@@ -115,7 +113,6 @@ class Trainer:
         self.ignore_idxs = ignore_idxs
         self.fp16 = fp16
         self.n_epochs = n_epochs
-        self.negative_samples = negative_samples
         self.single_input = single_input
 
     def state_dict(self):
@@ -127,7 +124,7 @@ class Trainer:
         self.optimizer.load_state_dict(state_dict['optimizer'])
 
     def collate_func(self, data):
-        persona_info, h, y, batch_candidates = zip(*data)
+        persona_info, h, y, distractors_batch = zip(*data)
 
         contexts = []
 
@@ -141,18 +138,12 @@ class Trainer:
 
         y_out = [torch.tensor(d, dtype=torch.long) for d in y]
 
-        distractors = []
-        if self.negative_samples > 0 and len(y) > 0:
-            distractors = sum((random.sample(candidates, k=self.negative_samples) for candidates in batch_candidates), ())
-            distractors = [torch.tensor(d, dtype=torch.long) for d in distractors]
-            if not distractors:  # nothing in batch_candidates, sample from train dataset (we may sample the gold y but quite unlikely)
-                distractors = random.sample(range(len(self.train_dataset)), k=(self.negative_samples * len(y)))
-                distractors = [torch.tensor(self.train_dataset[ids][-1], dtype=torch.long) for ids in distractors]
+        distractors = [torch.tensor(d, dtype=torch.long) for distractors in distractors_batch for d in distractors]
 
         if self.single_input:
             # we concatenate all the contexts in y (idem for distractors)
             y_out = [torch.cat(pieces, dim=0) for pieces in zip(*(contexts + [y_out]))]
-            extended_contexts = [c * self.negative_samples for c in contexts]  # negative samples * batch
+            extended_contexts = repeat_along_dim1(contexts, len(distractors)//len(y))
             distractors = [torch.cat(pieces, dim=0) for pieces in zip(*(extended_contexts + [distractors]))]
             contexts = []
 
@@ -174,6 +165,7 @@ class Trainer:
         for i, (contexts, targets, distractors) in enumerate(tqdm_data):
             contexts, targets, distractors = [c.to(self.device) for c in contexts], targets.to(self.device), distractors.to(self.device)
 
+            negative_samples = len(distractors)//len(targets)
             enc_contexts = []
 
             # lm loss on contexts
@@ -191,9 +183,9 @@ class Trainer:
 
             # s2s loss on targets
             nexts = targets[:, 1:].contiguous() if targets.dim() == 2 else targets[:, 1:, 0].contiguous()
-            if self.hits_weight > 0 and self.negative_samples > 0:
+            if self.hits_weight > 0 and negative_samples > 0:
                 # Keep the hidden states for hits@1 loss
-                hidden_state, padding_mask = self.model.transformer_module(targets, enc_contexts)
+                hidden_state, padding_mask, _ = self.model.transformer_module(targets, enc_contexts)
                 outputs = self.model.generate(hidden_state[:, :-1].contiguous())
             else:
                 outputs = self.model.decode(targets[:, :-1].contiguous(), enc_contexts)
@@ -201,11 +193,11 @@ class Trainer:
             batch_s2s_loss = self.criterion(outputs.view(-1, outputs.shape[-1]), nexts.view(-1))
 
             # hits@1 loss on distractors and targets
-            if self.hits_weight > 0 and self.negative_samples > 0:
-                extended_contexts = tuple(tuple(t.repeat(self.negative_samples, 1, 1) for t in c) for c in enc_contexts)
+            if self.hits_weight > 0 and negative_samples > 0:
+                extended_contexts = repeat_along_dim1(enc_contexts, negative_samples)
                 neg_logits = self.model.decode_classify(distractors, extended_contexts)
                 true_logits = self.model.classify(hidden_state, padding_mask)
-                clf_logits = torch.cat((true_logits.view(-1, 1), neg_logits.view(self.negative_samples, -1).transpose(0, 1)), dim=1)
+                clf_logits = torch.cat((true_logits.view(-1, 1), neg_logits.view(-1, negative_samples)), dim=1)
                 clf_labels = torch.tensor([0] * len(true_logits), dtype=torch.long, device=self.device)
                 batch_hits_loss = self.hits_criterion(clf_logits, clf_labels)
 
@@ -273,13 +265,12 @@ class Trainer:
             self.model.eval()
 
             tqdm_data = tqdm(self.test_dataloader, desc='Test')
-            s2s_loss = 0
-            lm_loss = 0
-            metrics = {name: 0 for name in metric_funcs.keys()}
+            metrics = {name: 0 for name in ('s2s_loss', 'lm_loss', 'hits_acc') + tuple(metric_funcs.keys())}
             full_references, full_predictions = [], []
             for i, (contexts, targets, distractors) in enumerate(tqdm_data):
                 contexts, targets, distractors = [c.to(self.device) for c in contexts], targets.to(self.device), distractors.to(self.device)
 
+                negative_samples = len(distractors)//len(targets)
                 enc_contexts = []
 
                 # lm loss
@@ -288,25 +279,39 @@ class Trainer:
                     enc_context = self.model.encode(context.clone())
                     enc_contexts.append(enc_context)
 
-                    if self.lm_weight > 0:
-                        context_outputs = self.model.generate(enc_context[0])
-                        ignore_mask = torch.stack([context == idx for idx in self.ignore_idxs], dim=-1).any(dim=-1)
-                        context.masked_fill_(ignore_mask, self.model.padding_idx)
-                        prevs, nexts = context_outputs[:, :-1, :].contiguous(), context[:, 1:].contiguous()
-                        batch_lm_loss += (self.lm_criterion(prevs.view(-1, prevs.shape[-1]), nexts.view(-1)) / len(contexts))
+                    context_outputs = self.model.generate(enc_context[0])
+                    ignore_mask = torch.stack([context == idx for idx in self.ignore_idxs], dim=-1).any(dim=-1)
+                    context.masked_fill_(ignore_mask, self.model.padding_idx)
+                    prevs, nexts = context_outputs[:, :-1, :].contiguous(), context[:, 1:].contiguous()
+                    batch_lm_loss += (self.lm_criterion(prevs.view(-1, prevs.shape[-1]), nexts.view(-1)) / len(contexts))
+                metrics['lm_loss'] = (metrics['lm_loss'] * i + batch_lm_loss.item()) / (i + 1)
 
-                # s2s loss
-                prevs, nexts = targets[:, :-1].contiguous(), targets[:, 1:].contiguous()
-                outputs = self.model.decode(prevs, enc_contexts)
-                outputs = F.log_softmax(outputs, dim=-1)
-                batch_s2s_loss = self.criterion(outputs.view(-1, outputs.shape[-1]), nexts.view(-1))
+                # s2s loss on targets
+                nexts = targets[:, 1:].contiguous() if targets.dim() == 2 else targets[:, 1:, 0].contiguous()
+                if negative_samples > 0:
+                    # Keep the hidden states for hits@1 loss
+                    hidden_state, padding_mask, _ = self.model.transformer_module(targets, enc_contexts)
+                    outputs = self.model.generate(hidden_state[:, :-1].contiguous())
+                else:
+                    outputs = self.model.decode(targets[:, :-1].contiguous(), enc_contexts)
+                batch_s2s_loss = self.lm_criterion(outputs.view(-1, outputs.shape[-1]), nexts.view(-1))  # We evaluate with CrossEntropy
+                metrics['s2s_loss'] = (metrics['s2s_loss'] * i + batch_s2s_loss.item()) / (i + 1)
 
+                # hits@1 loss on distractors and targets
+                batch_hits_acc = torch.tensor(0, dtype=torch.float, device=self.device)
+                if negative_samples > 0:
+                    extended_contexts = repeat_along_dim1(enc_contexts, negative_samples)
+                    neg_logits = self.model.decode_classify(distractors, extended_contexts)
+                    true_logits = self.model.classify(hidden_state, padding_mask)
+                    clf_logits = torch.cat((true_logits.view(-1, 1), neg_logits.view(-1, negative_samples)), dim=1)
+                    clf_labels = torch.tensor([0] * len(true_logits), dtype=torch.long, device=self.device)
+                    batch_hits_acc = torch.sum(torch.max(clf_logits, dim=1)[1] == clf_labels).float() / clf_labels.shape[0]
+                metrics['hits_acc'] = (metrics['hits_acc'] * i + batch_hits_acc.item()) / (i + 1)
+
+                # full sequence loss
                 predictions = self.model.beam_search(enc_contexts)
                 target_lens = targets.ne(self.model.padding_idx).sum(dim=-1)
                 targets = [t[1:l-1].tolist() for t, l in zip(targets, target_lens)]
-
-                lm_loss = (i * lm_loss + batch_lm_loss.item()) / (i + 1)
-                s2s_loss = (i * s2s_loss + batch_s2s_loss.item()) / (i + 1)
 
                 for name, func in metric_funcs.items():
                     score = func(predictions, targets)
@@ -319,7 +324,7 @@ class Trainer:
                     full_references.extend(string_targets)
                     full_predictions.extend(string_predictions)
 
-                tqdm_data.set_postfix(dict({'lm_loss': lm_loss, 's2s_loss': s2s_loss}, **metrics))
+                tqdm_data.set_postfix(dict((n, math.exp(v) if 'loss' in n else v) for n, v in metrics.items()))
 
             if external_metrics_func:
                 external_metrics = external_metrics_func(full_references, full_predictions)
@@ -327,12 +332,8 @@ class Trainer:
 
             # logging
             global_step = epoch * len(self.train_dataloader) // self.batch_split
-            self.writer.add_scalar("eval/batch_lm_loss", batch_lm_loss.item(), global_step=global_step)
-            self.writer.add_scalar("eval/batch_risk_loss", batch_risk_loss.item(), global_step=global_step)
-            self.writer.add_scalar("eval/batch_hits_loss", batch_hits_loss.item(), global_step=global_step)
-            self.writer.add_scalar("eval/batch_s2s_loss", batch_s2s_loss.item(), global_step=global_step)
-            self.writer.add_scalar("eval/full_loss", full_loss.item(), global_step=global_step)
-
+            for key, value in metrics.items():
+                self.writer.add_scalar("eval/{}".format(key), value, global_step=global_step)
             logger.info(metrics)
 
     def test(self, metric_funcs={}, external_metrics_func=None, epoch=-1):

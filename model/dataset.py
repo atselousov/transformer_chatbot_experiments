@@ -75,7 +75,8 @@ class FacebookDataset(Dataset):
 
         return dataset
 
-    def __init__(self, paths, vocab, *, max_lengths=2048, min_infos=2, dialog_embeddings=False, 
+    def __init__(self, paths, vocab, *, max_lengths=2048, min_infos=2, dialog_embeddings=False,
+                 use_start_end=True, negative_samples=0,
                  cache=None, augment=False, aug_syn_proba=0.1, aug_vary_length=True):
         assert min_infos > 0
 
@@ -90,6 +91,8 @@ class FacebookDataset(Dataset):
         self.max_lengths = max_lengths
         self.min_infos = min_infos
         self.dialog_embeddings = dialog_embeddings
+        self.use_start_end = use_start_end
+        self.negative_samples = negative_samples  # -1 => include all candidates in data instance
 
         if cache and os.path.exists(cache):
             self.data = torch.load(cache)
@@ -130,23 +133,35 @@ class FacebookDataset(Dataset):
 
         return sentences
 
+    def _get_distractors(self, candidates):
+        if self.negative_samples == 0:
+            return []
+        if self.negative_samples == -1:  # => include all candidates in data instance
+            return candidates
+        distractors = sum((random.sample(candidates, k=self.negative_samples) for candidates in batch_candidates), [])
+        if not distractors:  # nothing in candidates, sample from train dataset (we may sample the gold y but quite unlikely)
+            distractors = random.sample(range(len(self.data)), k=self.negative_samples)
+            distractors = [self.data[ids][-1] for ids in distractors]
+        return distractors
+
     def __getitem__(self, idx):
         persona_info, dialog, candidates = self.data[idx]
 
         if len(persona_info):
             persona_info = self._augment(persona_info, info=True)
             persona_info = sum(persona_info, [])
-            persona_info = [self.vocab.info_bos_id] + persona_info[:self.max_lengths-2] + [self.vocab.info_eos_id]
+            persona_info = [self.vocab.info_bos_id] + persona_info[:self.max_lengths-2] + [self.vocab.info_eos_id] if self.use_start_end else persona_info[:self.max_lengths]
             if self.dialog_embeddings:
                 persona_info = [[tok, self.vocab.info_dialog_id] for tok in persona_info]
 
         dialog = self._augment(dialog)
+        candidates = self._get_distractors(candidates)
 
         h = []
         for i, ids in enumerate(dialog[:-1], 1):
-            if i % 2 == 1:
+            if i % 2 == 1 and self.use_start_end:
                 ids = [self.vocab.talker1_bos_id] + ids + [self.vocab.talker1_eos_id]
-            else:
+            elif self.use_start_end:
                 ids = [self.vocab.talker2_bos_id] + ids + [self.vocab.talker2_eos_id]
             if self.dialog_embeddings:
                 ids = [[tok, self.vocab.talker1_dialog_id if i % 2 == 1 else self.vocab.talker2_dialog_id] for tok in ids]
@@ -154,9 +169,8 @@ class FacebookDataset(Dataset):
         h = h[-self.max_lengths:]
 
         sentences = []
-        for sentence in (dialog[-1:] + candidates):
-            y = [self.vocab.bos_id] + sentence + [self.vocab.eos_id]
-            y = y[:self.max_lengths]
+        for y in (dialog[-1:] + candidates):
+            y = [self.vocab.bos_id] + y[:self.max_lengths-2] + [self.vocab.eos_id] if self.use_start_end else y[:self.max_lengths]
             if self.dialog_embeddings:
                 y = [[tok, self.vocab.sent_dialog_id] for tok in y]
             sentences.append(y)

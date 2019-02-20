@@ -195,8 +195,8 @@ class TransformerBlock(nn.Module):
 
 class TransformerModule(nn.Module):
     def __init__(self, n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
-                 padding_idx, n_heads, dropout, embed_dropout, attn_dropout, ff_dropout, 
-                 n_segments=None):
+                 padding_idx, n_heads, dropout, embed_dropout, attn_dropout, ff_dropout,
+                 normalize_embeddings, n_segments=None):
         super(TransformerModule, self).__init__()
 
         self.embeddings = nn.Embedding(n_embeddings, embeddings_size, padding_idx=padding_idx)
@@ -204,6 +204,7 @@ class TransformerModule(nn.Module):
         self.embed_dropout = nn.Dropout(embed_dropout)
         self.layers = nn.ModuleList([TransformerBlock(embeddings_size, n_heads, dropout, attn_dropout, ff_dropout) for _ in range(n_layers)])
         self.n_segments = n_segments
+        self.normalize_embeddings = normalize_embeddings
 
         self._init_weights()
 
@@ -224,10 +225,12 @@ class TransformerModule(nn.Module):
         positions = torch.cumsum(~padding_mask, dim=-1, dtype=torch.long) + past_length
         positions.masked_fill_(padding_mask, self.pos_embeddings.padding_idx)
 
-        x = self.embeddings(x) # * math.sqrt(self.embeddings.embedding_dim)  # Add this to use pretrained last checkpoint
+        x = self.embeddings(x)
         if x.dim() == 4: # additional dialog embeddings
             x = x.sum(dim=-2)
-        x = x + self.pos_embeddings(positions) # x * math.sqrt(self.embeddings.embedding_dim) + self.pos_embeddings(positions)
+        if self.normalize_embeddings:
+            x = x * math.sqrt(self.embeddings.embedding_dim)  # Used in pretrained last checkpoint for ConvAI2
+        x = x + self.pos_embeddings(positions)
         x = self.embed_dropout(x)
 
         enc_contexts = sum(enc_contexts, ())
