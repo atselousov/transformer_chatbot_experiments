@@ -30,8 +30,8 @@ workflows:
   version: 2
   main:
     jobs:
-      - deploy_branch
-      - deploy_master:
+      - push_docker_branch
+      - push_docker_master:
           filters:
             branches:
               only:
