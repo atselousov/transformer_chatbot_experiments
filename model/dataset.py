@@ -40,7 +40,7 @@ class FacebookDataset(Dataset):
                     dialog_idx = int(line[:space_idx])
 
                 if int(dialog_idx) == 1:
-                    data.append({'persona_info': [], 'dialog': []})
+                    data.append({'persona_info': [], 'dialog': [], 'candidates': []})
 
                 dialog_line = line[space_idx + 1:].split('\t')
                 dialog_line = [l.strip() for l in dialog_line]
@@ -52,6 +52,8 @@ class FacebookDataset(Dataset):
                 elif len(dialog_line) > 1:
                     data[-1]['dialog'].append(dialog_line[0])
                     data[-1]['dialog'].append(dialog_line[1])
+                if len(dialog_line) == 4:
+                    data[-1]['candidates'].append(dialog_line[3].split('|')[:-1])  # the last candidate is a duplicate of the good answer (dialog_line[1])
 
             return data
 
@@ -65,7 +67,11 @@ class FacebookDataset(Dataset):
             for i, replica in enumerate(chat['dialog'], 1):
                 dialog.append(vocab.string2ids(replica))
                 if not i % 2:
-                    dataset.append((persona_info, dialog[:]))
+                    if chat['candidates']:
+                        candidates_ids = [vocab.string2ids(c) for c in chat['candidates'][(i-1)//2]]
+                        dataset.append((persona_info, dialog[:], candidates_ids))
+                    else:
+                        dataset.append((persona_info, dialog[:], []))
 
         return dataset
 
@@ -125,7 +131,7 @@ class FacebookDataset(Dataset):
         return sentences
 
     def __getitem__(self, idx):
-        persona_info, dialog = self.data[idx]
+        persona_info, dialog, candidates = self.data[idx]
 
         if len(persona_info):
             persona_info = self._augment(persona_info, info=True)
@@ -140,18 +146,19 @@ class FacebookDataset(Dataset):
         for i, ids in enumerate(dialog[:-1], 1):
             if i % 2 == 1:
                 ids = [self.vocab.talker1_bos_id] + ids + [self.vocab.talker1_eos_id]
-                if self.dialog_embeddings:
-                    ids = [[tok, self.vocab.talker1_dialog_id] for tok in ids]
             else:
                 ids = [self.vocab.talker2_bos_id] + ids + [self.vocab.talker2_eos_id]
-                if self.dialog_embeddings:
-                    ids = [[tok, self.vocab.talker2_dialog_id] for tok in ids]
+            if self.dialog_embeddings:
+                ids = [[tok, self.vocab.talker1_dialog_id if i % 2 == 1 else self.vocab.talker2_dialog_id] for tok in ids]
             h.extend(ids)
         h = h[-self.max_lengths:]
 
-        y = [self.vocab.bos_id] + dialog[-1] + [self.vocab.eos_id]
-        y = y[:self.max_lengths]
-        if self.dialog_embeddings:
-            y = [[tok, self.vocab.sent_dialog_id] for tok in y]
+        sentences = []
+        for sentence in (dialog[-1:] + candidates):
+            y = [self.vocab.bos_id] + sentence + [self.vocab.eos_id]
+            y = y[:self.max_lengths]
+            if self.dialog_embeddings:
+                y = [[tok, self.vocab.sent_dialog_id] for tok in y]
+            sentences.append(y)
 
-        return persona_info, h, y
+        return persona_info, h, sentences[0], sentences[1:]

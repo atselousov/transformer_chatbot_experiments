@@ -127,7 +127,7 @@ class Trainer:
         self.optimizer.load_state_dict(state_dict['optimizer'])
 
     def collate_func(self, data):
-        persona_info, h, y = zip(*data)
+        persona_info, h, y, batch_candidates = zip(*data)
 
         contexts = []
 
@@ -141,12 +141,13 @@ class Trainer:
 
         y_out = [torch.tensor(d, dtype=torch.long) for d in y]
 
+        distractors = []
         if self.negative_samples > 0 and len(y) > 0:
-            # sample self.negative_samples as distractors for each instance (we may sample the gold y but quite unlikely)
-            distractors = random.sample(range(len(self.train_dataset)), k=(self.negative_samples * len(y)))
-            distractors = [torch.tensor(self.train_dataset[ids][-1], dtype=torch.long) for ids in distractors]
-        else:
-            distractors = []
+            distractors = sum((random.sample(candidates, k=self.negative_samples) for candidates in batch_candidates), ())
+            distractors = [torch.tensor(d, dtype=torch.long) for d in distractors]
+            if not distractors:  # nothing in batch_candidates, sample from train dataset (we may sample the gold y but quite unlikely)
+                distractors = random.sample(range(len(self.train_dataset)), k=(self.negative_samples * len(y)))
+                distractors = [torch.tensor(self.train_dataset[ids][-1], dtype=torch.long) for ids in distractors]
 
         if self.single_input:
             # we concatenate all the contexts in y (idem for distractors)
@@ -267,12 +268,12 @@ class Trainer:
                 self.writer.add_scalar("training/lr", self.optimizer.get_lr(), global_step=global_step)
 
 
-    def _eval_test(self, metric_funcs={}, external_metrics_func=None):
+    def _eval_test(self, metric_funcs={}, external_metrics_func=None, epoch=-1):
         with torch.no_grad():
             self.model.eval()
 
             tqdm_data = tqdm(self.test_dataloader, desc='Test')
-            loss = 0
+            s2s_loss = 0
             lm_loss = 0
             metrics = {name: 0 for name in metric_funcs.keys()}
             full_references, full_predictions = [], []
@@ -298,14 +299,15 @@ class Trainer:
                 prevs, nexts = targets[:, :-1].contiguous(), targets[:, 1:].contiguous()
                 outputs = self.model.decode(prevs, enc_contexts)
                 outputs = F.log_softmax(outputs, dim=-1)
-                batch_loss = self.criterion(outputs.view(-1, outputs.shape[-1]), nexts.view(-1))
+                batch_s2s_loss = self.criterion(outputs.view(-1, outputs.shape[-1]), nexts.view(-1))
 
                 predictions = self.model.beam_search(enc_contexts)
                 target_lens = targets.ne(self.model.padding_idx).sum(dim=-1)
                 targets = [t[1:l-1].tolist() for t, l in zip(targets, target_lens)]
 
                 lm_loss = (i * lm_loss + batch_lm_loss.item()) / (i + 1)
-                loss = (i * loss + batch_loss.item()) / (i + 1)
+                s2s_loss = (i * s2s_loss + batch_s2s_loss.item()) / (i + 1)
+
                 for name, func in metric_funcs.items():
                     score = func(predictions, targets)
                     metrics[name] = (metrics[name] * i + score) / (i + 1)
@@ -317,17 +319,25 @@ class Trainer:
                     full_references.extend(string_targets)
                     full_predictions.extend(string_predictions)
 
-                tqdm_data.set_postfix(dict({'lm_loss': lm_loss, 'loss': loss}, **metrics))
+                tqdm_data.set_postfix(dict({'lm_loss': lm_loss, 's2s_loss': s2s_loss}, **metrics))
 
             if external_metrics_func:
                 external_metrics = external_metrics_func(full_references, full_predictions)
                 metrics.update(external_metrics)
 
+            # logging
+            global_step = epoch * len(self.train_dataloader) // self.batch_split
+            self.writer.add_scalar("eval/batch_lm_loss", batch_lm_loss.item(), global_step=global_step)
+            self.writer.add_scalar("eval/batch_risk_loss", batch_risk_loss.item(), global_step=global_step)
+            self.writer.add_scalar("eval/batch_hits_loss", batch_hits_loss.item(), global_step=global_step)
+            self.writer.add_scalar("eval/batch_s2s_loss", batch_s2s_loss.item(), global_step=global_step)
+            self.writer.add_scalar("eval/full_loss", full_loss.item(), global_step=global_step)
+
             logger.info(metrics)
 
-    def test(self, metric_funcs={}, external_metrics_func=None):
+    def test(self, metric_funcs={}, external_metrics_func=None, epoch=-1):
         if hasattr(self, 'test_dataloader'):
-            self._eval_test(metric_funcs, external_metrics_func)
+            self._eval_test(metric_funcs, external_metrics_func, epoch)
 
     def train(self, after_epoch_funcs=[], risk_func=None):
         for epoch in range(self.n_epochs):

@@ -70,7 +70,7 @@ def get_trainer_config():
                                           # './datasets/ConvAI2/train_self_revised_no_cands.txt',
                                           # './datasets/DailyDialog/train_dailydialog.txt'],
                        'train_datasets_cache': './datasets/train_datasets_cache.bin',
-                       'test_datasets': ['./datasets/ConvAI2/valid_self_original_no_cands.txt',],
+                       'test_datasets': ['./datasets/ConvAI2/valid_self_original.txt',],
                                          # './datasets/ConvAI2/valid_self_revised_no_cands.txt',
                                          # './datasets/DailyDialog/valid_dailydialog.txt'],
                        'test_datasets_cache': './datasets/test_datasets_cache.bin'})

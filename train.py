@@ -167,7 +167,7 @@ def main():
         model_trainer.model.eval()
         samples_idxs = random.sample(range(len(test_dataset)), n_samples)
         samples = [test_dataset[idx] for idx in samples_idxs]
-        for persona_info, dialog, target in samples:
+        for persona_info, dialog, target, candidates in samples:
             contexts = [torch.tensor([c], dtype=torch.long, device=model_trainer.device) for c in [persona_info, dialog] if len(c) > 0]
             prediction = model_trainer.model.predict(contexts)[0]
             
@@ -187,7 +187,7 @@ def main():
     def test_func(epoch):
         if (epoch+1) % trainer_config.test_period == 0:
             metric_funcs = {'f1_score': f1_score}
-            model_trainer.test(metric_funcs, external_metrics_func)
+            model_trainer.test(metric_funcs, external_metrics_func, epoch)
 
     def f1_risk(predictions, targets):
         scores = f1_score(predictions, targets, average=False)
