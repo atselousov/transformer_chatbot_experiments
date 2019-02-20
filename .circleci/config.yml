@@ -31,11 +31,9 @@ workflows:
   main:
     jobs:
       - deploy_branch:
-          context: org-global
       - deploy_master:
           filters:
             branches:
               only:
               - master
               - platform
-          context: org-global
