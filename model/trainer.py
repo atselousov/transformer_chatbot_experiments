@@ -51,9 +51,9 @@ class Trainer:
                 from apex.parallel import DistributedDataParallel
             except ImportError:
                 raise ImportError("Please install apex for distributed training.")
-            model = DistributedDataParallel(model)
+            self.model = DistributedDataParallel(self.model)
         if fp16:
-            model.half()
+            self.model.half()
 
         self.lm_criterion = nn.CrossEntropyLoss(ignore_index=self.model.padding_idx).to(device)
         self.hits_criterion = nn.CrossEntropyLoss().to(device)
@@ -179,7 +179,7 @@ class Trainer:
                     ignore_mask = torch.stack([context == idx for idx in self.ignore_idxs], dim=-1).any(dim=-1)
                     context.masked_fill_(ignore_mask, self.model.padding_idx)
                     prevs, nexts = context_outputs[:, :-1, :].contiguous(), context[:, 1:].contiguous()
-                    batch_lm_loss += (self.lm_criterion(prevs.view(-1, prevs.shape[-1]), nexts.view(-1)) / len(contexts))
+                    batch_lm_loss += (self.lm_criterion(prevs.view(-1, prevs.shape[-1]).float(), nexts.view(-1)) / len(contexts))
 
             # s2s loss on targets
             nexts = targets[:, 1:].contiguous() if targets.dim() == 2 else targets[:, 1:, 0].contiguous()
@@ -189,7 +189,7 @@ class Trainer:
                 outputs = self.model.generate(hidden_state[:, :-1].contiguous())
             else:
                 outputs = self.model.decode(targets[:, :-1].contiguous(), enc_contexts)
-            outputs = F.log_softmax(outputs, dim=-1)
+            outputs = F.log_softmax(outputs.float(), dim=-1)
             batch_s2s_loss = self.criterion(outputs.view(-1, outputs.shape[-1]), nexts.view(-1))
 
             # hits@1 loss on distractors and targets
@@ -199,7 +199,7 @@ class Trainer:
                 true_logits = self.model.classify(hidden_state, padding_mask)
                 clf_logits = torch.cat((true_logits.view(-1, 1), neg_logits.view(-1, negative_samples)), dim=1)
                 clf_labels = torch.tensor([0] * len(true_logits), dtype=torch.long, device=self.device)
-                batch_hits_loss = self.hits_criterion(clf_logits, clf_labels)
+                batch_hits_loss = self.hits_criterion(clf_logits.float(), clf_labels)
 
             # risk loss
             batch_risk_loss = torch.tensor(0, dtype=torch.float, device=self.device)
@@ -220,7 +220,7 @@ class Trainer:
                 batch_probas = []
                 for b in range(beams.shape[1]):
                     logits = self.model.decode(beams[:, b, :-1], enc_contexts)
-                    probas = F.log_softmax(logits, dim=-1)
+                    probas = F.log_softmax(logits.float(), dim=-1)
                     probas = torch.gather(probas, -1, beams[:, b, 1:].unsqueeze(-1)).squeeze(-1)
                     probas = probas.sum(dim=-1) / beam_lens[:, b].float()
                     batch_probas.append(probas)
@@ -283,7 +283,7 @@ class Trainer:
                     ignore_mask = torch.stack([context == idx for idx in self.ignore_idxs], dim=-1).any(dim=-1)
                     context.masked_fill_(ignore_mask, self.model.padding_idx)
                     prevs, nexts = context_outputs[:, :-1, :].contiguous(), context[:, 1:].contiguous()
-                    batch_lm_loss += (self.lm_criterion(prevs.view(-1, prevs.shape[-1]), nexts.view(-1)) / len(contexts))
+                    batch_lm_loss += (self.lm_criterion(prevs.view(-1, prevs.shape[-1]).float(), nexts.view(-1)) / len(contexts))
                 metrics['lm_loss'] = (metrics['lm_loss'] * i + batch_lm_loss.item()) / (i + 1)
 
                 # s2s loss on targets
@@ -294,7 +294,7 @@ class Trainer:
                     outputs = self.model.generate(hidden_state[:, :-1].contiguous())
                 else:
                     outputs = self.model.decode(targets[:, :-1].contiguous(), enc_contexts)
-                batch_s2s_loss = self.lm_criterion(outputs.view(-1, outputs.shape[-1]), nexts.view(-1))  # We evaluate with CrossEntropy
+                batch_s2s_loss = self.lm_criterion(outputs.view(-1, outputs.shape[-1]).float(), nexts.view(-1))  # We evaluate with CrossEntropy
                 metrics['s2s_loss'] = (metrics['s2s_loss'] * i + batch_s2s_loss.item()) / (i + 1)
 
                 # hits@1 loss on distractors and targets
