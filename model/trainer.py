@@ -211,8 +211,9 @@ class Trainer:
             # risk loss
             batch_risk_loss = torch.tensor(0, dtype=torch.float, device=self.device)
             if risk_func is not None and self.risk_weight > 0:
-
+                self.model.eval()  # desactivate dropout
                 beams, beam_lens = self.model.beam_search(enc_contexts, return_beams=True)
+                self.model.train()  # re-activate dropout
 
                 target_lens = targets.ne(self.model.padding_idx).sum(dim=-1)
                 targets = [target[1:length-1].tolist() for target, length in zip(targets, target_lens)]
@@ -338,4 +339,4 @@ class Trainer:
 
         if self.n_epochs == 0:
             for func in after_epoch_funcs:
-                func(0)
+                func(-1)

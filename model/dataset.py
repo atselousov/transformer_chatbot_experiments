@@ -132,7 +132,7 @@ class FacebookDataset(Dataset):
             persona_info = sum(persona_info, [])
             persona_info = [self.vocab.info_bos_id] + persona_info[:self.max_lengths-2] + [self.vocab.info_eos_id]
             if self.dialog_embeddings:
-                persona_info = [[tok, persona_info[0]] for tok in persona_info]
+                persona_info = [[tok, self.vocab.info_dialog_id] for tok in persona_info]
 
         dialog = self._augment(dialog)
 
@@ -140,16 +140,18 @@ class FacebookDataset(Dataset):
         for i, ids in enumerate(dialog[:-1], 1):
             if i % 2 == 1:
                 ids = [self.vocab.talker1_bos_id] + ids + [self.vocab.talker1_eos_id]
+                if self.dialog_embeddings:
+                    ids = [[tok, self.vocab.talker1_dialog_id] for tok in ids]
             else:
                 ids = [self.vocab.talker2_bos_id] + ids + [self.vocab.talker2_eos_id]
-            if self.dialog_embeddings:
-                ids = [[tok, ids[0]] for tok in ids]
+                if self.dialog_embeddings:
+                    ids = [[tok, self.vocab.talker2_dialog_id] for tok in ids]
             h.extend(ids)
         h = h[-self.max_lengths:]
 
         y = [self.vocab.bos_id] + dialog[-1] + [self.vocab.eos_id]
         y = y[:self.max_lengths]
         if self.dialog_embeddings:
-            y = [[tok, y[0]] for tok in y]
+            y = [[tok, self.vocab.sent_dialog_id] for tok in y]
 
         return persona_info, h, y
