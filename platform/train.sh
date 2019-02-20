@@ -10,6 +10,7 @@ DATA_ROOT="storage://truskovskiyk/convai"
 
 CMD="python train.py"
 
+
 neuro job submit \
         --cpu ${CPU} --gpu ${GPU} --memory ${MEM} --gpu-model nvidia-tesla-v100 \
         --volume ${DATA_ROOT}/meteor-1.5/:/workspace/meteor-1.5:rw \
@@ -19,4 +20,3 @@ neuro job submit \
         --non-preemptible \
         ${IMAGE} \
         "${CMD}"
-
