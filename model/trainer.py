@@ -67,8 +67,10 @@ class Trainer:
             ]
 
         try:
-            from apex.optimizers import FusedAdam
-            base_optimizer = FusedAdam(optimizer_grouped_parameters, lr=lr, bias_correction=False, max_grad_norm=1.0)
+            # TODO (truskovskiyk 20.02.2019 FusedAdam raises nan errors for me)
+            # from apex.optimizers import FusedAdam
+            # base_optimizer = FusedAdam(optimizer_grouped_parameters, lr=lr, bias_correction=False, max_grad_norm=1.0)
+            base_optimizer = Adam(optimizer_grouped_parameters, lr=lr)
         except ImportError:
             logger.info("Apex not found, not using FusedAdam.")
             base_optimizer = Adam(optimizer_grouped_parameters, lr=lr)
