@@ -1,0 +1,43 @@
+defaults: &defaults
+  machine:
+    image: circleci/classic:201711-01
+    docker_layer_caching: true
+  working_directory: ~/transformer_chatbot
+
+
+version: 2
+
+jobs:
+  push_docker_branch:
+    <<: *defaults
+    steps:
+      - checkout
+      - run:
+          name: Building and pushing docker images for branch
+          command: |
+            make build_and_push_docker
+
+  push_docker_master:
+    <<: *defaults
+    steps:
+      - checkout
+      - run:
+          name: Building and pushing docker images for master
+          command: |
+            make build_and_push_docker_latest
+
+workflows:
+  version: 2
+  main:
+    jobs:
+      - deploy_branch:
+          context: org-global
+      - deploy_master:
+          requires:
+            - test
+          filters:
+            branches:
+              only:
+              - master
+              - platform
+          context: org-global
