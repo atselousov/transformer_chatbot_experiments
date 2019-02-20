@@ -80,6 +80,7 @@ def main():
                                    embed_dropout=model_config.embed_dropout,
                                    attn_dropout=model_config.attn_dropout,
                                    ff_dropout=model_config.ff_dropout,
+                                   normalize_embeddings=model_config.normalize_embeddings,
                                    bos_id=vocab.bos_id,
                                    eos_id=vocab.eos_id,
                                    sent_dialog_id=vocab.sent_dialog_id,
@@ -106,13 +107,17 @@ def main():
     train_dataset = FacebookDataset(trainer_config.train_datasets, vocab,
                                     max_lengths=(transformer.n_pos_embeddings - 1) // (3 if trainer_config.single_input else 1),  # A bit restrictive here
                                     dialog_embeddings=trainer_config.dialog_embeddings,
-                                    cache=trainer_config.train_datasets_cache, 
+                                    cache=trainer_config.train_datasets_cache,
+                                    use_start_end=trainer_config.use_start_end,
+                                    negative_samples=trainer_config.negative_samples,
                                     augment=trainer_config.persona_augment,
                                     aug_syn_proba=trainer_config.persona_aug_syn_proba)
     test_dataset = FacebookDataset(trainer_config.test_datasets, vocab,
                                    max_lengths=(transformer.n_pos_embeddings - 1) // (3 if trainer_config.single_input else 1),  # A bit restrictive here
                                    dialog_embeddings=trainer_config.dialog_embeddings,
                                    cache=trainer_config.test_datasets_cache,
+                                   use_start_end=trainer_config.use_start_end,
+                                   negative_samples=-1,  # Keep all negative samples
                                    augment=False,
                                    aug_syn_proba=0.0)
 
@@ -120,8 +125,9 @@ def main():
                             train_dataset,
                             writer,
                             test_dataset,
-                            batch_size=trainer_config.batch_size,
+                            train_batch_size=trainer_config.train_batch_size,
                             batch_split=trainer_config.batch_split,
+                            test_batch_size=trainer_config.test_batch_size,
                             lr=trainer_config.lr,
                             lr_warmup=trainer_config.lr_warmup,
                             weight_decay=trainer_config.weight_decay,
@@ -129,7 +135,6 @@ def main():
                             lm_weight=trainer_config.lm_weight,
                             risk_weight=trainer_config.risk_weight,
                             hits_weight=trainer_config.hits_weight,
-                            negative_samples=trainer_config.negative_samples,
                             single_input=trainer_config.single_input,
                             n_jobs=trainer_config.n_jobs,
                             clip_grad=trainer_config.clip_grad,
@@ -163,11 +168,11 @@ def main():
             torch.save(model_trainer.state_dict(), last_checkpoint_path)
 
     def sample_text_func(epoch):
-        n_samples = 5
+        n_samples = 0
         model_trainer.model.eval()
         samples_idxs = random.sample(range(len(test_dataset)), n_samples)
         samples = [test_dataset[idx] for idx in samples_idxs]
-        for persona_info, dialog, target in samples:
+        for persona_info, dialog, target, _ in samples:
             contexts = [torch.tensor([c], dtype=torch.long, device=model_trainer.device) for c in [persona_info, dialog] if len(c) > 0]
             prediction = model_trainer.model.predict(contexts)[0]
             
@@ -187,7 +192,7 @@ def main():
     def test_func(epoch):
         if (epoch+1) % trainer_config.test_period == 0:
             metric_funcs = {'f1_score': f1_score}
-            model_trainer.test(metric_funcs, external_metrics_func)
+            model_trainer.test(metric_funcs, external_metrics_func, epoch)
 
     def f1_risk(predictions, targets):
         scores = f1_score(predictions, targets, average=False)

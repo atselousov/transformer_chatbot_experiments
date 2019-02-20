@@ -40,7 +40,7 @@ class FacebookDataset(Dataset):
                     dialog_idx = int(line[:space_idx])
 
                 if int(dialog_idx) == 1:
-                    data.append({'persona_info': [], 'dialog': []})
+                    data.append({'persona_info': [], 'dialog': [], 'candidates': []})
 
                 dialog_line = line[space_idx + 1:].split('\t')
                 dialog_line = [l.strip() for l in dialog_line]
@@ -52,6 +52,8 @@ class FacebookDataset(Dataset):
                 elif len(dialog_line) > 1:
                     data[-1]['dialog'].append(dialog_line[0])
                     data[-1]['dialog'].append(dialog_line[1])
+                if len(dialog_line) == 4:
+                    data[-1]['candidates'].append(dialog_line[3].split('|')[:-1])  # the last candidate is a duplicate of the good answer (dialog_line[1])
 
             return data
 
@@ -65,11 +67,16 @@ class FacebookDataset(Dataset):
             for i, replica in enumerate(chat['dialog'], 1):
                 dialog.append(vocab.string2ids(replica))
                 if not i % 2:
-                    dataset.append((persona_info, dialog[:]))
+                    if chat['candidates']:
+                        candidates_ids = [vocab.string2ids(c) for c in chat['candidates'][(i-1)//2]]
+                        dataset.append((persona_info, dialog[:], candidates_ids))
+                    else:
+                        dataset.append((persona_info, dialog[:], []))
 
         return dataset
 
-    def __init__(self, paths, vocab, *, max_lengths=2048, min_infos=2, dialog_embeddings=False, 
+    def __init__(self, paths, vocab, *, max_lengths=2048, min_infos=2, dialog_embeddings=False,
+                 use_start_end=True, negative_samples=0,
                  cache=None, augment=False, aug_syn_proba=0.1, aug_vary_length=True):
         assert min_infos > 0
 
@@ -84,6 +91,8 @@ class FacebookDataset(Dataset):
         self.max_lengths = max_lengths
         self.min_infos = min_infos
         self.dialog_embeddings = dialog_embeddings
+        self.use_start_end = use_start_end
+        self.negative_samples = negative_samples  # -1 => include all candidates in data instance
 
         if cache and os.path.exists(cache):
             self.data = torch.load(cache)
@@ -124,34 +133,47 @@ class FacebookDataset(Dataset):
 
         return sentences
 
+    def _get_distractors(self, candidates):
+        if self.negative_samples == 0:
+            return []
+        if self.negative_samples == -1:  # => include all candidates in data instance
+            return candidates
+        if len(candidates) >= self.negative_samples:
+            distractors = random.sample(candidates, k=self.negative_samples)
+        else:  # not enought candidates, sample from train dataset instead (we may sample the gold y but quite unlikely)
+            distractors = random.sample(range(len(self.data)), k=self.negative_samples)
+            distractors = [self.data[ids][1][-1] for ids in distractors]
+        return distractors
+
     def __getitem__(self, idx):
-        persona_info, dialog = self.data[idx]
+        persona_info, dialog, candidates = self.data[idx]
 
         if len(persona_info):
             persona_info = self._augment(persona_info, info=True)
             persona_info = sum(persona_info, [])
-            persona_info = [self.vocab.info_bos_id] + persona_info[:self.max_lengths-2] + [self.vocab.info_eos_id]
+            persona_info = [self.vocab.info_bos_id] + persona_info[:self.max_lengths-2] + [self.vocab.info_eos_id] if self.use_start_end else persona_info[:self.max_lengths]
             if self.dialog_embeddings:
                 persona_info = [[tok, self.vocab.info_dialog_id] for tok in persona_info]
 
         dialog = self._augment(dialog)
+        candidates = self._get_distractors(candidates)
 
         h = []
         for i, ids in enumerate(dialog[:-1], 1):
-            if i % 2 == 1:
+            if i % 2 == 1 and self.use_start_end:
                 ids = [self.vocab.talker1_bos_id] + ids + [self.vocab.talker1_eos_id]
-                if self.dialog_embeddings:
-                    ids = [[tok, self.vocab.talker1_dialog_id] for tok in ids]
-            else:
+            elif self.use_start_end:
                 ids = [self.vocab.talker2_bos_id] + ids + [self.vocab.talker2_eos_id]
-                if self.dialog_embeddings:
-                    ids = [[tok, self.vocab.talker2_dialog_id] for tok in ids]
+            if self.dialog_embeddings:
+                ids = [[tok, self.vocab.talker1_dialog_id if i % 2 == 1 else self.vocab.talker2_dialog_id] for tok in ids]
             h.extend(ids)
         h = h[-self.max_lengths:]
 
-        y = [self.vocab.bos_id] + dialog[-1] + [self.vocab.eos_id]
-        y = y[:self.max_lengths]
-        if self.dialog_embeddings:
-            y = [[tok, self.vocab.sent_dialog_id] for tok in y]
+        sentences = []
+        for y in (dialog[-1:] + candidates):
+            y = [self.vocab.bos_id] + y[:self.max_lengths-2] + [self.vocab.eos_id] if self.use_start_end else y[:self.max_lengths]
+            if self.dialog_embeddings:
+                y = [[tok, self.vocab.sent_dialog_id] for tok in y]
+            sentences.append(y)
 
-        return persona_info, h, y
+        return persona_info, h, sentences[0], sentences[1:]
