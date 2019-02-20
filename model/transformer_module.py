@@ -115,7 +115,7 @@ class MultiheadAttention(nn.Module):
         else:
             assert False
 
-        save_key_value = torch.stack((key, value))
+        save_key_value = (key, value)
         save_query = query
 
         query = self._split_heads(query)

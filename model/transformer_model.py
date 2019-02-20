@@ -135,8 +135,15 @@ class TransformerModel(nn.Module):
             batch_size = enc_contexts[0][0].shape[0] if beam_starts is None else beam_starts.shape[0]
             device = next(self.parameters()).device
 
-            prevs = beam_starts if beam_starts is not None else torch.full((batch_size, 1), fill_value=self.bos_id, dtype=torch.long, device=device)
-            tail_dims = prevs.shape[1:]
+            if beam_starts is not None:
+                if self.dialog_embeddings and beam_starts.dim() == 3:
+                    prevs = torch.tensor([[[self.bos_id, self.sent_dialog_id]]], dtype=torch.long, device=device)
+                else:
+                    prevs = torch.tensor([[self.bos_id]], dtype=torch.long, device=device)
+                prevs = torch.cat((beam_starts, prevs), dim=1)
+            else:
+                prevs = torch.full((batch_size, 1), fill_value=self.bos_id, dtype=torch.long, device=device)
+            tail_dims = prevs.shape[1:]  # prevs may be of shape (batch, seq_length, 2) or (batch, seq_length)
             prevs = prevs.unsqueeze(1).repeat([1, self.beam_size] + [1] * len(tail_dims))
             prevs = prevs.view(-1, *tail_dims)
 
@@ -157,7 +164,8 @@ class TransformerModel(nn.Module):
             diversity_penalty = torch.zeros((batch_size, self.n_embeddings), device=device)
             past = None
 
-            for i in range(self.max_seq_len):
+            max_seq_len = min((self.n_pos_embeddings - prevs.shape[1]), self.max_seq_len)
+            for i in range(max_seq_len):
                 inputs = prevs if past is None else prevs[:, -1:, ...]  # only use the last token (rest is in past)
                 if self.dialog_embeddings and inputs.dim() < 3:
                     inputs = torch.stack((inputs, torch.full_like(inputs, self.sent_dialog_id)), dim=inputs.dim())

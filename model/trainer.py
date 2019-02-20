@@ -243,6 +243,12 @@ class Trainer:
                          + self.s2s_weight * batch_s2s_loss) / self.batch_split
             self.optimizer.backward(full_loss)
 
+            lm_loss = (i * lm_loss + batch_lm_loss.item()) / (i + 1)
+            s2s_loss = (i * s2s_loss + batch_s2s_loss.item()) / (i + 1)
+            risk_loss = (i * risk_loss + batch_risk_loss.item()) / (i + 1)
+            hits_loss = (i * hits_loss + batch_hits_loss.item()) / (i + 1)
+            tqdm_data.set_postfix({'lm_loss': lm_loss, 's2s_loss': s2s_loss, 'risk_loss': risk_loss, 'hits_loss': hits_loss})
+
             if (i + 1) % self.batch_split == 0:
                 if self.clip_grad is not None:
                     for group in self.optimizer.param_groups:
@@ -250,13 +256,6 @@ class Trainer:
 
                 self.optimizer.step()
                 self.optimizer.zero_grad()
-
-                lm_loss = (i * lm_loss + batch_lm_loss.item()) / (i + 1)
-                s2s_loss = (i * s2s_loss + batch_s2s_loss.item()) / (i + 1)
-                risk_loss = (i * risk_loss + batch_risk_loss.item()) / (i + 1)
-                hits_loss = (i * hits_loss + batch_hits_loss.item()) / (i + 1)
-
-                tqdm_data.set_postfix({'lm_loss': lm_loss, 's2s_loss': s2s_loss, 'risk_loss': risk_loss, 'hits_loss': hits_loss})
 
                 # logging
                 global_step = (epoch * len(self.train_dataloader) + (i + 1)) // self.batch_split
