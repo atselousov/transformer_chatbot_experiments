@@ -128,6 +128,11 @@ class TransformerModel(nn.Module):
         return (5 + sequence_lengths) ** self.length_penalty_coef / (5 + 1) ** self.length_penalty_coef
 
     def beam_search(self, enc_contexts=[], return_beams=False, beam_starts=None):
+        def expand_to_beam_size(t):  # from (batch, seq_length, XX) to (batch, seq_length, XX)
+            tail_dims = t.shape[1:]  # t may be of shape (batch, seq_length, XX) or (batch, seq_length)
+            t = t.unsqueeze(1).repeat([1, self.beam_size] + [1] * len(tail_dims))
+            return t.view(-1, *tail_dims)
+
         with torch.no_grad():
             if len(enc_contexts) == 0 and beam_starts is None:
                 return []
@@ -135,30 +140,16 @@ class TransformerModel(nn.Module):
             batch_size = enc_contexts[0][0].shape[0] if beam_starts is None else beam_starts.shape[0]
             device = next(self.parameters()).device
 
-            if beam_starts is not None:
-                if self.dialog_embeddings and beam_starts.dim() == 3:
-                    prevs = torch.tensor([[[self.bos_id, self.sent_dialog_id]]], dtype=torch.long, device=device)
-                else:
-                    prevs = torch.tensor([[self.bos_id]], dtype=torch.long, device=device)
-                prevs = torch.cat((beam_starts, prevs), dim=1)
-            else:
-                prevs = torch.full((batch_size, 1), fill_value=self.bos_id, dtype=torch.long, device=device)
-            tail_dims = prevs.shape[1:]  # prevs may be of shape (batch, seq_length, 2) or (batch, seq_length)
-            prevs = prevs.unsqueeze(1).repeat([1, self.beam_size] + [1] * len(tail_dims))
-            prevs = prevs.view(-1, *tail_dims)
+            prevs = torch.full((batch_size * self.beam_size, 1), fill_value=self.bos_id, dtype=torch.long, device=device)
 
             beam_scores = torch.zeros(batch_size, self.beam_size, device=device)
             beam_lens = torch.ones(batch_size, self.beam_size, dtype=torch.long, device=device)
             is_end = torch.zeros(batch_size, self.beam_size, dtype=torch.uint8, device=device)
 
-            beam_enc_contexts = []
-            for c, p in enc_contexts:
-                c = c.unsqueeze(1).repeat(1, self.beam_size, 1, 1)
-                c = c.view(-1, c.shape[2], c.shape[3])
-                p = p.unsqueeze(1).repeat(1, self.beam_size, 1)
-                p = p.view(-1, p.shape[2])
-                beam_enc_contexts.append((c, p))
-            
+            if beam_starts is not None:
+                beam_starts = expand_to_beam_size(beam_starts)
+            beam_enc_contexts = tuple(tuple(expand_to_beam_size(t) for t in c) for c in enc_contexts)
+
             current_sample_prob = 1
             group_size = self.beam_size // self.diversity_groups
             diversity_penalty = torch.zeros((batch_size, self.n_embeddings), device=device)
@@ -169,6 +160,8 @@ class TransformerModel(nn.Module):
                 inputs = prevs if past is None else prevs[:, -1:, ...]  # only use the last token (rest is in past)
                 if self.dialog_embeddings and inputs.dim() < 3:
                     inputs = torch.stack((inputs, torch.full_like(inputs, self.sent_dialog_id)), dim=inputs.dim())
+                if i == 0 and beam_starts is not None:
+                    inputs = torch.cat((beam_starts, inputs), dim=1)
                 outputs, _, past = self.transformer_module(inputs, beam_enc_contexts, past=past)
 
                 logits = self.generate(outputs[:, -1, :])
