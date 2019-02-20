@@ -42,9 +42,8 @@ f1: 0.178
 hits@1: 0.173
 
 
-Run experiments
+Run all experiments on the platform
 ```
-neuro job submit --non-preemptible -g 1 --gpu-model nvidia-tesla-v100 -c 6 -m 24GB -x --http 8080 --ssh 22 -v storage://truskovskiyk/convai/:/data/ truskovskyi/ludwig "fasdfasdf "
-neuro model debug --localport 12789 job-52fbbd34-2c88-49a5-ad2f-d62b04f13887
+./platform/train.sh
 
 ```

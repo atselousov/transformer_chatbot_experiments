@@ -1,18 +1,11 @@
 SHELL := /bin/bash
-USER_NAME ?= truskovskiyk
-USER_PASS ?= $(CI_KYRYL_TOKEN)
-IMAGE_NAME ?= transformer_chatbot
-IMAGE_TAG ?= latest
-DOCKER_REGISTRY ?= registry.staging.neuromation.io
 
+docker_hub_latest:
+	docker login -u truskovskyi -p transformer_chatbot
+	docker build -t truskovskyi/transformer_chatbot:latest -f platform/Dockerfile .
+	docker push truskovskyi/transformer_chatbot:latest
 
-build_and_push_docker:
-	docker login -u $(USER_NAME) -p $(USER_PASS) $(DOCKER_REGISTRY)
-	docker build -t $(DOCKER_REGISTRY)/$(USER_NAME)/$(IMAGE_NAME):$(IMAGE_TAG) -f platform/Dockerfile .
-	docker tag $(DOCKER_REGISTRY)/$(USER_NAME)/$(IMAGE_NAME):$(IMAGE_TAG) $(DOCKER_REGISTRY)/$(USER_NAME)/$(IMAGE_NAME):$(CIRCLE_SHA1)
-	docker push $(DOCKER_REGISTRY)/$(USER_NAME)/$(IMAGE_NAME):$(CIRCLE_SHA1)
-
-build_and_push_docker_latest:
-	docker login -u $(USER_NAME) -p $(USER_PASS) $(DOCKER_REGISTRY)
-	docker build -t $(DOCKER_REGISTRY)/$(USER_NAME)/$(IMAGE_NAME):$(IMAGE_TAG) -f platform/Dockerfile .
-	docker push $(DOCKER_REGISTRY)/$(USER_NAME)/$(IMAGE_NAME):$(IMAGE_TAG)
+docker_hub_branch:
+	docker login -u truskovskyi -p transformer_chatbot
+	docker build -t truskovskyi/transformer_chatbot:$(CIRCLE_SHA1) -f platform/Dockerfile .
+	docker push truskovskyi/transformer_chatbot:$(CIRCLE_SHA1)

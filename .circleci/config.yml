@@ -15,7 +15,7 @@ jobs:
       - run:
           name: Building and pushing docker images for branch
           command: |
-            make build_and_push_docker
+            make docker_hub_branch
 
   push_docker_master:
     <<: *defaults
@@ -24,13 +24,13 @@ jobs:
       - run:
           name: Building and pushing docker images for master
           command: |
-            make build_and_push_docker_latest
+            make docker_hub_latest
 
 workflows:
   version: 2
   main:
     jobs:
-      - deploy_branch:
+      - deploy_branch
       - deploy_master:
           filters:
             branches:
