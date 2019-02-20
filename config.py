@@ -13,6 +13,7 @@ def get_model_config():
                        'checkpoint_path': './checkpoints/last_checkpoint',  # Keep the checpoint folder for the checkpoints of the agents
                        'n_layers': default_config.n_layers,
                        'n_pos_embeddings': 512,
+                       'gpt2': False,
                        'embeddings_size': default_config.embeddings_size,
                        'n_heads': default_config.n_heads,
                        'dropout': default_config.dropout,

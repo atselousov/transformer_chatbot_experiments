@@ -157,7 +157,7 @@ class FeedForward(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, n_features, n_heads, dropout, attn_dropout, ff_dropout):
+    def __init__(self, n_features, n_heads, dropout, attn_dropout, ff_dropout, gpt2=False):
         super(TransformerBlock, self).__init__()
 
         self.attn = MultiheadAttention(n_features, n_heads, attn_dropout)
@@ -165,10 +165,14 @@ class TransformerBlock(nn.Module):
         self.ff = FeedForward(n_features, 4 * n_features, ff_dropout)
         self.ff_norm = LayerNorm(n_features)
         self.dropout = nn.Dropout(dropout)
+        self.gpt2 = gpt2
 
     def forward(self, x, padding_mask, *contexts, layer_past=None):
         '''contexts = [(context1, padding_mask1), ...]'''
 
+        if self.gpt2:
+            x_before = x  # save x
+            x = self.attn_norm(x_before)
         inputs = (x, padding_mask) + contexts
 
         full_attn = 0
@@ -184,11 +188,18 @@ class TransformerBlock(nn.Module):
             full_attn += (a / n_attn)
 
         full_attn = self.dropout(full_attn)
-        x = self.attn_norm(x + full_attn)
+        if self.gpt2:
+            x_before = x_before + full_attn
+            x = self.ff_norm(x_before)
+        else:
+            x = self.attn_norm(x + full_attn)
 
         f = self.ff(x)
         f = self.dropout(f)
-        x = self.ff_norm(x + f)
+        if self.gpt2:
+            x = x_before + f
+        else:
+            x = self.ff_norm(x + f)
 
         return (x, padding_mask) + contexts + (save_kv,)
 
@@ -196,13 +207,16 @@ class TransformerBlock(nn.Module):
 class TransformerModule(nn.Module):
     def __init__(self, n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
                  padding_idx, n_heads, dropout, embed_dropout, attn_dropout, ff_dropout,
-                 normalize_embeddings, n_segments=None):
+                 normalize_embeddings, n_segments=None, gpt2=False):
         super(TransformerModule, self).__init__()
 
         self.embeddings = nn.Embedding(n_embeddings, embeddings_size, padding_idx=padding_idx)
         self.pos_embeddings = nn.Embedding(n_pos_embeddings + 1, embeddings_size, padding_idx=0)
         self.embed_dropout = nn.Dropout(embed_dropout)
-        self.layers = nn.ModuleList([TransformerBlock(embeddings_size, n_heads, dropout, attn_dropout, ff_dropout) for _ in range(n_layers)])
+        self.layers = nn.ModuleList([TransformerBlock(embeddings_size, n_heads, dropout, attn_dropout, ff_dropout, gpt2) for _ in range(n_layers)])
+        if gpt2:
+            self.f_norm = LayerNorm(embeddings_size)
+        self.gpt2 = gpt2
         self.n_segments = n_segments
         self.normalize_embeddings = normalize_embeddings
 
