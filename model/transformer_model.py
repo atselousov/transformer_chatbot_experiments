@@ -21,6 +21,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .transformer_module import TransformerModule
+from .utils import repeat_along_dim1
 
 logger = logging.getLogger(__file__)
 
@@ -53,7 +54,7 @@ class TransformerModel(nn.Module):
     def __init__(self, n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
                  padding_idx, n_heads, dropout, embed_dropout, attn_dropout, ff_dropout,
                  bos_id, eos_id, sent_dialog_id, max_seq_len=256, beam_size=5, sample=False,
-                 length_penalty=0.8, annealing_topk=None, annealing=0, 
+                 length_penalty=0.8, annealing_topk=None, annealing=0, normalize_embeddings=True,
                  diversity_coef=0, diversity_groups=1, n_segments=None, multiple_choice_head=False,
                  single_input=False, dialog_embeddings=False, vocab=None):
 
@@ -84,7 +85,7 @@ class TransformerModel(nn.Module):
 
         self.transformer_module = TransformerModule(n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
                                                     padding_idx, n_heads, dropout, embed_dropout, attn_dropout,
-                                                    ff_dropout, n_segments)
+                                                    ff_dropout, normalize_embeddings, n_segments)
         self.pre_softmax = nn.Linear(embeddings_size, n_embeddings, bias=False)
         self.pre_softmax.weight = self.transformer_module.embeddings.weight
         self.multiple_choice_head = MultipleChoiceHead(self.embeddings_size, dropout) if multiple_choice_head else None
@@ -135,32 +136,29 @@ class TransformerModel(nn.Module):
             batch_size = enc_contexts[0][0].shape[0] if beam_starts is None else beam_starts.shape[0]
             device = next(self.parameters()).device
 
-            prevs = beam_starts if beam_starts is not None else torch.full((batch_size, 1), fill_value=self.bos_id, dtype=torch.long, device=device)
-            tail_dims = prevs.shape[1:]
-            prevs = prevs.unsqueeze(1).repeat([1, self.beam_size] + [1] * len(tail_dims))
-            prevs = prevs.view(-1, *tail_dims)
+            prevs = torch.full((batch_size * self.beam_size, 1), fill_value=self.bos_id, dtype=torch.long, device=device)
 
             beam_scores = torch.zeros(batch_size, self.beam_size, device=device)
             beam_lens = torch.ones(batch_size, self.beam_size, dtype=torch.long, device=device)
             is_end = torch.zeros(batch_size, self.beam_size, dtype=torch.uint8, device=device)
 
-            beam_enc_contexts = []
-            for c, p in enc_contexts:
-                c = c.unsqueeze(1).repeat(1, self.beam_size, 1, 1)
-                c = c.view(-1, c.shape[2], c.shape[3])
-                p = p.unsqueeze(1).repeat(1, self.beam_size, 1)
-                p = p.view(-1, p.shape[2])
-                beam_enc_contexts.append((c, p))
-            
+            if beam_starts is not None:
+                beam_starts = repeat_along_dim1(beam_starts, self.beam_size)
+            beam_enc_contexts = repeat_along_dim1(enc_contexts, self.beam_size)
+
             current_sample_prob = 1
             group_size = self.beam_size // self.diversity_groups
             diversity_penalty = torch.zeros((batch_size, self.n_embeddings), device=device)
             past = None
 
-            for i in range(self.max_seq_len):
+            max_seq_len = min(self.n_pos_embeddings - prevs.shape[1] - (beam_starts.shape[1] if beam_starts is not None else 0),
+                              self.max_seq_len)
+            for i in range(max_seq_len):
                 inputs = prevs if past is None else prevs[:, -1:, ...]  # only use the last token (rest is in past)
                 if self.dialog_embeddings and inputs.dim() < 3:
                     inputs = torch.stack((inputs, torch.full_like(inputs, self.sent_dialog_id)), dim=inputs.dim())
+                if i == 0 and beam_starts is not None:
+                    inputs = torch.cat((beam_starts, inputs), dim=1)
                 outputs, _, past = self.transformer_module(inputs, beam_enc_contexts, past=past)
 
                 logits = self.generate(outputs[:, -1, :])

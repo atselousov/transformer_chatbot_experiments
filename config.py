@@ -19,6 +19,7 @@ def get_model_config():
                        'embed_dropout': default_config.embed_dropout,
                        'attn_dropout': default_config.attn_dropout,
                        'ff_dropout': default_config.ff_dropout,
+                       'normalize_embeddings': True,  # Used in pretrained last checkpoint for ConvAI2
                        'max_seq_len': 256,
                        'beam_size': 3,
                        'diversity_coef': 0,
@@ -33,9 +34,10 @@ def get_model_config():
 
 
 def get_trainer_config():
-    config = AttrDict({'n_epochs': 10,
-                       'batch_size': 256,
+    config = AttrDict({'n_epochs': 3,
+                       'train_batch_size': 256,
                        'batch_split': 64,
+                       'test_batch_size': 8,
                        'lr': 6.25e-5,
                        'lr_warmup': 0.002,  # a fraction of total training (epoch * train_set_length) if linear_schedule == True
                        'weight_decay': 0.01,
@@ -46,6 +48,7 @@ def get_trainer_config():
                        'negative_samples': 2,
                        'single_input': True,
                        'dialog_embeddings': True,
+                       'use_start_end': True,
                        'n_jobs': 0,
                        'label_smoothing': 0.1,
                        'clip_grad': None,
@@ -70,20 +73,22 @@ def get_trainer_config():
                                           # './datasets/ConvAI2/train_self_revised_no_cands.txt',
                                           # './datasets/DailyDialog/train_dailydialog.txt'],
                        'train_datasets_cache': './datasets/train_datasets_cache.bin',
-                       'test_datasets': ['./datasets/ConvAI2/valid_self_original_no_cands.txt',],
+                       'test_datasets': ['./datasets/ConvAI2/valid_self_original.txt',],
                                          # './datasets/ConvAI2/valid_self_revised_no_cands.txt',
                                          # './datasets/DailyDialog/valid_dailydialog.txt'],
                        'test_datasets_cache': './datasets/test_datasets_cache.bin'})
 
     local_config = deepcopy(config)
-    local_config.batch_size = 2
+    local_config.train_batch_size = 2
     local_config.batch_split = 1
+    local_config.test_batch_size = 3
     local_config.negative_samples = 2
     local_config.n_jobs = 0
     local_config.device = 'cpu'
     local_config.load_last = './checkpoints/last_checkpoint'
     local_config.fp16 = False
-    local_config.single_input = True
-    local_config.dialog_embeddings = True
+    local_config.single_input = False
+    local_config.dialog_embeddings = False
+    local_config.use_start_end = True
 
     return config if torch.cuda.is_available() else local_config
