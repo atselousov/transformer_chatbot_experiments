@@ -33,8 +33,6 @@ workflows:
       - deploy_branch:
           context: org-global
       - deploy_master:
-          requires:
-            - test
           filters:
             branches:
               only:
