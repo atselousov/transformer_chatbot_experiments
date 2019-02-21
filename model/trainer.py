@@ -364,7 +364,9 @@ class Trainer:
                         full_references.extend(string_targets)
                         full_predictions.extend(string_predictions)
 
-                tqdm_data.set_postfix(dict((n, math.exp(v) if 'loss' in n else v) for n, v in metrics.items()))
+                metrics['lm_ppl'] = math.exp(metrics['lm_loss'])
+                metrics['s2s_ppl'] = math.exp(metrics['s2s_loss'])
+                tqdm_data.set_postfix(dict(**metrics))
 
             if external_metrics_func and self.evaluate_full_sequences:
                 external_metrics = external_metrics_func(full_references, full_predictions)

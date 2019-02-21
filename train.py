@@ -112,7 +112,8 @@ def main():
                                     use_start_end=trainer_config.use_start_end,
                                     negative_samples=trainer_config.negative_samples,
                                     augment=trainer_config.persona_augment,
-                                    aug_syn_proba=trainer_config.persona_aug_syn_proba)
+                                    aug_syn_proba=trainer_config.persona_aug_syn_proba,
+                                    limit_size=trainer_config.limit_train_size)
     test_dataset = FacebookDataset(trainer_config.test_datasets, vocab,
                                    max_lengths=(transformer.n_pos_embeddings - 1) // (3 if trainer_config.single_input else 1),  # A bit restrictive here
                                    dialog_embeddings=trainer_config.dialog_embeddings,

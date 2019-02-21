@@ -62,6 +62,7 @@ def get_trainer_config():
                        'linear_schedule': True,
                        'evaluate_full_sequences': False,
                        'limit_eval_size': -1,
+                       'limit_train_size': -1,
                        'load_last': '',  # Now that we save several experiments you can put the path of the checpoint file you want to load here
                        'repo_id': str(repo),
                        'repo_sha': str(repo.head.object.hexsha),
