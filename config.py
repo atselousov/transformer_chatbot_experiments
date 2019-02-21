@@ -28,13 +28,13 @@ def get_model_config():
                        'annealing': 0,
                        'length_penalty': 0.6,
                        'n_segments': None,
-                       'multiple_choice_head': True})
+                       'multiple_choice_head': False})
 
     return config
 
 
 def get_trainer_config():
-    config = AttrDict({'n_epochs': 3,
+    config = AttrDict({'n_epochs': 1,
                        'train_batch_size': 256,
                        'batch_split': 64,
                        'test_batch_size': 8,
@@ -44,10 +44,10 @@ def get_trainer_config():
                        's2s_weight': 1,
                        'lm_weight': 0.5,
                        'risk_weight': 0,
-                       'hits_weight': 1,
-                       'negative_samples': 2,
-                       'single_input': True,
-                       'dialog_embeddings': True,
+                       'hits_weight': 0,
+                       'negative_samples': 0,
+                       'single_input': False,
+                       'dialog_embeddings': False,
                        'use_start_end': True,
                        'n_jobs': 0,
                        'label_smoothing': 0.1,
@@ -61,9 +61,9 @@ def get_trainer_config():
                        'loss_scale': 0,
                        'linear_schedule': True,
                        'evaluate_full_sequences': False,
-                       'limit_eval_size': -1,
-                       'limit_train_size': -1,
-                       'load_last': '',  # Now that we save several experiments you can put the path of the checpoint file you want to load here
+                       'limit_eval_size': 256,
+                       'limit_train_size': 256,
+                       'load_last': './checkpoints/last_checkpoint',  # Now that we save several experiments you can put the path of the checpoint file you want to load here
                        'repo_id': str(repo),
                        'repo_sha': str(repo.head.object.hexsha),
                        'repo_branch': str(repo.active_branch),

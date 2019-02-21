@@ -158,14 +158,20 @@ def main():
 
     # helpers -----------------------------------------------------
     def external_metrics_func(full_references, full_predictions):
-        with open(os.path.join(writer.log_dir, trainer_config.eval_references_file), 'w', encoding='utf-8') as f:
+        references_file_path = os.path.join(writer.log_dir, trainer_config.eval_references_file)
+        predictions_file_path = os.path.join(writer.log_dir, trainer_config.eval_predictions_file)
+        with open(references_file_path, 'w', encoding='utf-8') as f:
             f.write(unicode('\n'.join(full_references)))
-        with open(os.path.join(writer.log_dir, trainer_config.eval_predictions_file), 'w', encoding='utf-8') as f:
+        with open(predictions_file_path, 'w', encoding='utf-8') as f:
             f.write(unicode('\n'.join(full_predictions)))
 
-        nist, bleu, meteor, entropy, div, avg_len = nlp_metrics([trainer_config.eval_references_file],
-                                                                trainer_config.eval_predictions_file)
-        return {'nist': nist, 'bleu': bleu, 'meteor': meteor, 'entropy': entropy, 'div': div, 'avg_len': avg_len}
+        nist, bleu, meteor, entropy, div, avg_len = nlp_metrics([references_file_path], predictions_file_path)
+
+        metrics = {'meteor': meteor, 'avg_len': avg_len}
+        for name, metric in (('nist', nist), ('entropy', entropy), ('div', div), ('bleu', bleu)):
+            for i, m in enumerate(metric):
+                metrics['{}_{}'.format(name, i+1)] = m
+        return metrics
 
     def save_func(epoch):
         if epoch != -1:

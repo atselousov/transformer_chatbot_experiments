@@ -210,7 +210,8 @@ class Trainer:
             batch_s2s_loss = self.criterion(outputs.view(-1, outputs.shape[-1]), nexts.view(-1))
 
             # hits@1 loss on distractors and targets
-            if self.hits_weight > 0 and negative_samples > 0:
+            batch_hits_loss = torch.tensor(0, dtype=torch.float, device=self.device)
+            if self.hits_weight > 0 and negative_samples > 0 and self.model.multiple_choice_head is not None:
                 extended_contexts = repeat_along_dim1(enc_contexts, negative_samples)
                 neg_logits = self.model.decode_classify(distractors, extended_contexts)
                 true_logits = self.model.classify(hidden_state, padding_mask)
@@ -329,7 +330,7 @@ class Trainer:
 
                 # hits@1 loss on distractors and targets
                 batch_hits_acc = torch.tensor(0, dtype=torch.float, device=self.device)
-                if negative_samples > 0:
+                if negative_samples > 0 and self.model.multiple_choice_head is not None:
                     extended_contexts = repeat_along_dim1(enc_contexts, negative_samples)
                     neg_logits = self.model.decode_classify(distractors, extended_contexts)
                     true_logits = self.model.classify(hidden_state, padding_mask)
@@ -350,7 +351,7 @@ class Trainer:
                         predictions = self.model.beam_search(enc_contexts=enc_contexts, beam_starts=torch.cat(contexts, dim=1) if self.single_input else None)
                     labels = targets if targets.dim() == 2 else targets[:, :, 0]
                     labels_lens = labels.ne(self.model.padding_idx).sum(dim=-1)
-                    labels_start = [context.shape[1] + 1 for context in contexts] if self.single_input else [1] * len(contexts)
+                    labels_start = [context.shape[1] + 1 for context in contexts] if self.single_input else [1] * len(targets)
                     labels = [t[s:l-1].tolist() for t, s, l in zip(labels, labels_start, labels_lens)]
 
                     for name, func in metric_funcs.items():
