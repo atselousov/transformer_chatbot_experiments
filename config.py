@@ -61,8 +61,8 @@ def get_trainer_config():
                        'loss_scale': 0,
                        'linear_schedule': True,
                        'evaluate_full_sequences': True,
-                       'limit_eval_size': 256,
-                       'limit_train_size': 256,
+                       'limit_eval_size': -1,
+                       'limit_train_size': -1,
                        'load_last': '', #./checkpoints/last_checkpoint',  # Now that we save several experiments you can put the path of the checpoint file you want to load here
                        'repo_id': str(repo),
                        'repo_sha': str(repo.head.object.hexsha),
@@ -75,11 +75,11 @@ def get_trainer_config():
                        'train_datasets': ['./datasets/ConvAI2/train_self_original_no_cands.txt',
                                           './datasets/ConvAI2/train_self_revised_no_cands.txt',
                                           './datasets/DailyDialog/train_dailydialog.txt'],
-                       'train_datasets_cache': '',
+                       'train_datasets_cache': 'train_cache.bin',
                        'test_datasets': ['./datasets/ConvAI2/valid_self_original.txt',],
                                          # './datasets/ConvAI2/valid_self_revised_no_cands.txt',
                                          # './datasets/DailyDialog/valid_dailydialog.txt'],
-                       'test_datasets_cache': ''})
+                       'test_datasets_cache': 'test_cache.bin'})
 
     local_config = deepcopy(config)
     local_config.train_batch_size = 2
