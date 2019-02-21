@@ -162,7 +162,7 @@ class TransformerModel(nn.Module):
                 outputs, _, past = self.transformer_module(inputs, beam_enc_contexts, past=past)
 
                 logits = self.generate(outputs[:, -1, :])
-                log_probs = F.log_softmax(logits, dim=-1)
+                log_probs = F.log_softmax(logits.float(), dim=-1)
                 log_probs = log_probs.view(batch_size, self.beam_size, -1)
 
                 beam_scores = beam_scores.unsqueeze(-1) + log_probs * (1 - is_end.float().unsqueeze(-1))

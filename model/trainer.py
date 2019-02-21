@@ -37,23 +37,30 @@ class Trainer:
                  batch_split=1, s2s_weight=1, lm_weight=0.5, risk_weight=0, hits_weight=0, lr=6.25e-5, lr_warmup=2000, 
                  n_jobs=0, clip_grad=None, label_smoothing=0, device=torch.device('cuda'), weight_decay=0.1,
                  ignore_idxs=[], local_rank=-1, fp16=False, loss_scale=0,
-                 linear_schedule=False, n_epochs=0, single_input=False):
+                 linear_schedule=False, n_epochs=0, single_input=False, evaluate_full_sequences=False):
         if local_rank != -1:
             torch.cuda.set_device(local_rank)
             device = torch.device("cuda", local_rank)
-            torch.distributed.init_process_group(backend='nccl')  # Initializes the distributed backend
-        logger.info("device: {}, distributed training: {}, 16-bits training: {}".format(
-            device, bool(local_rank != -1), fp16))
+            torch.distributed.init_process_group(backend='nccl',
+                                                init_method='env://')
+        n_gpu = torch.cuda.device_count()
+        logger.info("device: {}, distributed training: {}, 16-bits training: {}, n_gpu: {}".format(
+            device, bool(local_rank != -1), fp16, n_gpu))
 
         self.model = model.to(device)
+        if fp16:
+            self.model.half()
+
         if local_rank != -1:
             try:
                 from apex.parallel import DistributedDataParallel
+                self.model = DistributedDataParallel(self.model)
             except ImportError:
                 raise ImportError("Please install apex for distributed training.")
-            self.model = DistributedDataParallel(self.model)
-        if fp16:
-            self.model.half()
+            # self.model = nn.parallel.DistributedDataParallel(self.model, device_ids=[device], output_device=device)
+        elif n_gpu > 1 and batch_split % n_gpu == 0 and batch_split > n_gpu:
+            self.model.transformer_module = nn.DataParallel(self.model.transformer_module)
+            batch_split = batch_split // n_gpu
 
         self.lm_criterion = nn.CrossEntropyLoss(ignore_index=self.model.padding_idx).to(device)
         self.hits_criterion = nn.CrossEntropyLoss().to(device)
@@ -77,8 +84,10 @@ class Trainer:
         if fp16:
             try:
                 from apex.optimizers import FP16_Optimizer
+                from apex.optimizers import FusedAdam
             except ImportError:
                 raise ImportError("Please install apex for fp16.")
+            base_optimizer = FusedAdam(optimizer_grouped_parameters, lr=lr, bias_correction=False, max_grad_norm=1.0)
             if loss_scale == 0:
                 base_optimizer = FP16_Optimizer(base_optimizer, dynamic_loss_scale=True)
             else:
@@ -116,6 +125,7 @@ class Trainer:
         self.fp16 = fp16
         self.n_epochs = n_epochs
         self.single_input = single_input
+        self.evaluate_full_sequences = evaluate_full_sequences
 
     def state_dict(self):
         return {'model': self.model.state_dict(),
@@ -147,12 +157,15 @@ class Trainer:
             y_out = [torch.cat(pieces, dim=0) for pieces in zip(*(contexts + [y_out]))]
             extended_contexts = [[t for t in c for _ in range(len(distractors)//len(y))] for c in contexts]
             distractors = [torch.cat(pieces, dim=0) for pieces in zip(*(extended_contexts + [distractors]))]
-            contexts = []
+            contexts = [torch.cat(pieces, dim=0) for pieces in zip(*(contexts))]
 
         # Pad now so we pad correctly when we have only a single input (context concatenated with y)
-        contexts = [pad_sequence(c, batch_first=True, padding_value=self.model.padding_idx) for c in contexts]
         y_out = pad_sequence(y_out, batch_first=True, padding_value=self.model.padding_idx)
         distractors = pad_sequence(distractors, batch_first=True, padding_value=self.model.padding_idx)
+        if not self.single_input:
+            contexts = [pad_sequence(c, batch_first=True, padding_value=self.model.padding_idx) for c in contexts]
+        else:
+            contexts = [t.unsqueeze(0) for t in contexts]
 
         return contexts, y_out, distractors
 
@@ -172,16 +185,18 @@ class Trainer:
 
             # lm loss on contexts
             batch_lm_loss = torch.tensor(0, dtype=torch.float, device=self.device)
-            for context in contexts:
-                enc_context = self.model.encode(context.clone())
-                enc_contexts.append(enc_context)
+            if not self.single_input:
+                for context in contexts:
+                    enc_context = self.model.encode(context.clone())
+                    enc_contexts.append(enc_context)
 
-                if self.lm_weight > 0:
-                    context_outputs = self.model.generate(enc_context[0])
-                    ignore_mask = torch.stack([context == idx for idx in self.ignore_idxs], dim=-1).any(dim=-1)
-                    context.masked_fill_(ignore_mask, self.model.padding_idx)
-                    prevs, nexts = context_outputs[:, :-1, :].contiguous(), context[:, 1:].contiguous()
-                    batch_lm_loss += (self.lm_criterion(prevs.view(-1, prevs.shape[-1]).float(), nexts.view(-1)) / len(contexts))
+                    if self.lm_weight > 0:
+                        context_outputs = self.model.generate(enc_context[0])
+                        ignore_mask = torch.stack([context == idx for idx in self.ignore_idxs], dim=-1).any(dim=-1)
+                        context.masked_fill_(ignore_mask, self.model.padding_idx)
+                        prevs = context_outputs[:, :-1, :].contiguous()
+                        nexts = context[:, 1:].contiguous() if context.dim() == 2 else context[:, 1:, 0].contiguous()
+                        batch_lm_loss += (self.lm_criterion(prevs.view(-1, prevs.shape[-1]).float(), nexts.view(-1)) / len(contexts))
 
             # s2s loss on targets
             nexts = targets[:, 1:].contiguous() if targets.dim() == 2 else targets[:, 1:, 0].contiguous()
@@ -195,7 +210,8 @@ class Trainer:
             batch_s2s_loss = self.criterion(outputs.view(-1, outputs.shape[-1]), nexts.view(-1))
 
             # hits@1 loss on distractors and targets
-            if self.hits_weight > 0 and negative_samples > 0:
+            batch_hits_loss = torch.tensor(0, dtype=torch.float, device=self.device)
+            if self.hits_weight > 0 and negative_samples > 0 and self.model.multiple_choice_head is not None:
                 extended_contexts = repeat_along_dim1(enc_contexts, negative_samples)
                 neg_logits = self.model.decode_classify(distractors, extended_contexts)
                 true_logits = self.model.classify(hidden_state, padding_mask)
@@ -207,15 +223,26 @@ class Trainer:
             batch_risk_loss = torch.tensor(0, dtype=torch.float, device=self.device)
             if risk_func is not None and self.risk_weight > 0:
                 self.model.eval()  # desactivate dropout
-                beams, beam_lens = self.model.beam_search(enc_contexts, return_beams=True)
+                if self.single_input:
+                    beams, beam_lens = []
+                    for b in range(targets.shape[0]):
+                        beam_outputs = self.model.beam_search(beam_starts=contexts[b], return_beams=True)
+                        beams.append(beam_outputs[0])
+                        beam_lens.append(beam_outputs[1])
+                    beams = torch.cat(beams, dim=0)
+                    beam_lens = torch.cat(beam_lens, dim=0)
+                else:
+                    beams, beam_lens = self.model.beam_search(enc_contexts=enc_contexts, beam_starts=None, return_beams=True)
                 self.model.train()  # re-activate dropout
 
-                target_lens = targets.ne(self.model.padding_idx).sum(dim=-1)
-                targets = [target[1:length-1].tolist() for target, length in zip(targets, target_lens)]
+                labels = targets if targets.dim() == 2 else targets[:, :, 0]
+                labels_lens = labels.ne(self.model.padding_idx).sum(dim=-1)
+                labels_start = [context.shape[1] + 1 for context in contexts] if self.single_input else [1] * len(contexts)
+                labels = [t[s:l-1].tolist() for t, s, l in zip(labels, labels_start, labels_lens)]
                 batch_risks = []
                 for b in range(beams.shape[1]):
                     predictions = [b[1:l-1].tolist() for b, l in zip(beams[:, b, :], beam_lens[:, b])]
-                    risks = torch.tensor(risk_func(predictions, targets), dtype=torch.float, device=self.device)
+                    risks = torch.tensor(risk_func(predictions, labels), dtype=torch.float, device=self.device)
                     batch_risks.append(risks)
                 batch_risks = torch.stack(batch_risks, dim=-1)
 
@@ -277,15 +304,17 @@ class Trainer:
 
                 # lm loss
                 batch_lm_loss = torch.tensor(0, dtype=torch.float, device=self.device)
-                for context in contexts:
-                    enc_context = self.model.encode(context.clone())
-                    enc_contexts.append(enc_context)
+                if not self.single_input:
+                    for context in contexts:
+                        enc_context = self.model.encode(context.clone())
+                        enc_contexts.append(enc_context)
 
-                    context_outputs = self.model.generate(enc_context[0])
-                    ignore_mask = torch.stack([context == idx for idx in self.ignore_idxs], dim=-1).any(dim=-1)
-                    context.masked_fill_(ignore_mask, self.model.padding_idx)
-                    prevs, nexts = context_outputs[:, :-1, :].contiguous(), context[:, 1:].contiguous()
-                    batch_lm_loss += (self.lm_criterion(prevs.view(-1, prevs.shape[-1]).float(), nexts.view(-1)) / len(contexts))
+                        context_outputs = self.model.generate(enc_context[0])
+                        ignore_mask = torch.stack([context == idx for idx in self.ignore_idxs], dim=-1).any(dim=-1)
+                        context.masked_fill_(ignore_mask, self.model.padding_idx)
+                        prevs = context_outputs[:, :-1, :].contiguous()
+                        nexts = context[:, 1:].contiguous() if context.dim() == 2 else context[:, 1:, 0].contiguous()
+                        batch_lm_loss += (self.lm_criterion(prevs.view(-1, prevs.shape[-1]).float(), nexts.view(-1)) / len(contexts))
                 metrics['lm_loss'] = (metrics['lm_loss'] * i + batch_lm_loss.item()) / (i + 1)
 
                 # s2s loss on targets
@@ -301,7 +330,7 @@ class Trainer:
 
                 # hits@1 loss on distractors and targets
                 batch_hits_acc = torch.tensor(0, dtype=torch.float, device=self.device)
-                if negative_samples > 0:
+                if negative_samples > 0 and self.model.multiple_choice_head is not None:
                     extended_contexts = repeat_along_dim1(enc_contexts, negative_samples)
                     neg_logits = self.model.decode_classify(distractors, extended_contexts)
                     true_logits = self.model.classify(hidden_state, padding_mask)
@@ -311,24 +340,36 @@ class Trainer:
                 metrics['hits_acc'] = (metrics['hits_acc'] * i + batch_hits_acc.item()) / (i + 1)
 
                 # full sequence loss
-                predictions = self.model.beam_search(enc_contexts)
-                target_lens = targets.ne(self.model.padding_idx).sum(dim=-1)
-                targets = [t[1:l-1].tolist() for t, l in zip(targets, target_lens)]
+                if self.evaluate_full_sequences:
+                    if self.single_input:
+                        predictions = []
+                        for b in range(targets.shape[0]):
+                            beam_outputs = self.model.beam_search(beam_starts=contexts[b])
+                            predictions.append(beam_outputs)
+                        predictions = sum(predictions, [])
+                    else:
+                        predictions = self.model.beam_search(enc_contexts=enc_contexts, beam_starts=torch.cat(contexts, dim=1) if self.single_input else None)
+                    labels = targets if targets.dim() == 2 else targets[:, :, 0]
+                    labels_lens = labels.ne(self.model.padding_idx).sum(dim=-1)
+                    labels_start = [context.shape[1] + 1 for context in contexts] if self.single_input else [1] * len(targets)
+                    labels = [t[s:l-1].tolist() for t, s, l in zip(labels, labels_start, labels_lens)]
 
-                for name, func in metric_funcs.items():
-                    score = func(predictions, targets)
-                    metrics[name] = (metrics[name] * i + score) / (i + 1)
+                    for name, func in metric_funcs.items():
+                        score = func(predictions, labels)
+                        metrics[name] = (metrics[name] * i + score) / (i + 1)
 
-                if external_metrics_func:
-                    # Store text strings for external metrics
-                    string_targets = list(self.vocab.ids2string(t) for t in targets)
-                    string_predictions = list(self.vocab.ids2string(t) for t in predictions)
-                    full_references.extend(string_targets)
-                    full_predictions.extend(string_predictions)
+                    if external_metrics_func:
+                        # Store text strings for external metrics
+                        string_targets = list(self.vocab.ids2string(t) for t in labels)
+                        string_predictions = list(self.vocab.ids2string(t) for t in predictions)
+                        full_references.extend(string_targets)
+                        full_predictions.extend(string_predictions)
 
-                tqdm_data.set_postfix(dict((n, math.exp(v) if 'loss' in n else v) for n, v in metrics.items()))
+                metrics['lm_ppl'] = math.exp(metrics['lm_loss'])
+                metrics['s2s_ppl'] = math.exp(metrics['s2s_loss'])
+                tqdm_data.set_postfix(dict(**metrics))
 
-            if external_metrics_func:
+            if external_metrics_func and self.evaluate_full_sequences:
                 external_metrics = external_metrics_func(full_references, full_predictions)
                 metrics.update(external_metrics)
 

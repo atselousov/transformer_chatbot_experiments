@@ -76,7 +76,7 @@ class FacebookDataset(Dataset):
         return dataset
 
     def __init__(self, paths, vocab, *, max_lengths=2048, min_infos=2, dialog_embeddings=False,
-                 use_start_end=True, negative_samples=0,
+                 use_start_end=True, negative_samples=0, limit_size=-1,
                  cache=None, augment=False, aug_syn_proba=0.1, aug_vary_length=True):
         assert min_infos > 0
 
@@ -101,6 +101,8 @@ class FacebookDataset(Dataset):
             self.data = FacebookDataset.make_dataset(parsed_data, vocab)
             if cache:
                 torch.save(self.data, cache)
+        if limit_size > 0:
+            self.data = self.data[:limit_size]
 
     def __len__(self):
         return len(self.data)

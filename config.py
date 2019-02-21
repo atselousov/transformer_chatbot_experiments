@@ -3,10 +3,8 @@ from copy import deepcopy
 import torch
 from model.utils import openai_transformer_config
 import git
-import os
 
 repo = git.Repo(search_parent_directories=True)
-
 
 def get_model_config():
     default_config = openai_transformer_config()
@@ -30,7 +28,7 @@ def get_model_config():
                        'annealing': 0,
                        'length_penalty': 0.6,
                        'n_segments': None,
-                       'multiple_choice_head': True})
+                       'multiple_choice_head': False})
 
     return config
 
@@ -46,12 +44,12 @@ def get_trainer_config():
                        's2s_weight': 1,
                        'lm_weight': 0.5,
                        'risk_weight': 0,
-                       'hits_weight': 1,
-                       'negative_samples': 2,
-                       'single_input': True,
-                       'dialog_embeddings': True,
+                       'hits_weight': 0,
+                       'negative_samples': 0,
+                       'single_input': False,
+                       'dialog_embeddings': False,
                        'use_start_end': True,
-                       'n_jobs': 0,
+                       'n_jobs': 4,
                        'label_smoothing': 0.1,
                        'clip_grad': None,
                        'test_period': 1,
@@ -59,10 +57,13 @@ def get_trainer_config():
                        'device': 'cuda',
                        'persona_augment': False,
                        'persona_aug_syn_proba': 0.0,
-                       'fp16': bool(os.getenv("FP16", False)),
+                       'fp16': True,
                        'loss_scale': 0,
                        'linear_schedule': True,
-                       'load_last': '',  # Now that we save several experiments you can put the path of the checpoint file you want to load here
+                       'evaluate_full_sequences': True,
+                       'limit_eval_size': -1,
+                       'limit_train_size': -1,
+                       'load_last': '', #./checkpoints/last_checkpoint',  # Now that we save several experiments you can put the path of the checpoint file you want to load here
                        'repo_id': str(repo),
                        'repo_sha': str(repo.head.object.hexsha),
                        'repo_branch': str(repo.active_branch),
@@ -71,14 +72,14 @@ def get_trainer_config():
                        'eval_references_file': 'eval_references_file',
                        'eval_predictions_file': 'eval_predictions_file',
                        'interrupt_checkpoint_path': 'interrupt_checkpoint',  # there are now in the ./runs/XXX/ experiments folders
-                       'train_datasets': ['./datasets/ConvAI2/train_self_original_no_cands.txt',],
-                                          # './datasets/ConvAI2/train_self_revised_no_cands.txt',
-                                          # './datasets/DailyDialog/train_dailydialog.txt'],
-                       'train_datasets_cache': './datasets/train_datasets_cache.bin',
+                       'train_datasets': ['./datasets/ConvAI2/train_self_original_no_cands.txt',
+                                          './datasets/ConvAI2/train_self_revised_no_cands.txt',
+                                          './datasets/DailyDialog/train_dailydialog.txt'],
+                       'train_datasets_cache': 'train_cache.bin',
                        'test_datasets': ['./datasets/ConvAI2/valid_self_original.txt',],
                                          # './datasets/ConvAI2/valid_self_revised_no_cands.txt',
                                          # './datasets/DailyDialog/valid_dailydialog.txt'],
-                       'test_datasets_cache': './datasets/test_datasets_cache.bin'})
+                       'test_datasets_cache': 'test_cache.bin'})
 
     local_config = deepcopy(config)
     local_config.train_batch_size = 2
