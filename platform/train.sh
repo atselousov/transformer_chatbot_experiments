@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-#!/usr/bin/env bash
 
 CPU=6
 GPU=1
@@ -9,8 +8,8 @@ IMAGE="truskovskyi/transformer_chatbot:latest"
 DATA_ROOT="storage://truskovskiyk/convai"
 
 CMD="python train.py"
-DESCRIPTION="experiment#1"
-CONFIGURATION="./platform/configurations/experiment1"
+DESCRIPTION="experiment#2"
+CONFIGURATION="./platform/configurations/experiment2"
 
 neuro job submit \
         --cpu ${CPU} --gpu ${GPU} --memory ${MEM} --gpu-model nvidia-tesla-v100 \
