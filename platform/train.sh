@@ -22,3 +22,7 @@ neuro job submit \
         --non-preemptible \
         ${IMAGE} \
         "${CMD}"
+
+
+#neuro job submit --non-preemptible -c 2 -m 4GB --http 8080 -v storage://truskovskiyk/convai/runs:/data/ tensorflow/tensorflow "tensorboard --logdir /data --port 8080"
+#neuro model debug --localport 12789
