@@ -145,7 +145,7 @@ class Trainer:
         if self.single_input:
             # we concatenate all the contexts in y (idem for distractors)
             y_out = [torch.cat(pieces, dim=0) for pieces in zip(*(contexts + [y_out]))]
-            extended_contexts = repeat_along_dim1(contexts, len(distractors)//len(y))
+            extended_contexts = [[t for t in c for _ in range(len(distractors)//len(y))] for c in contexts]
             distractors = [torch.cat(pieces, dim=0) for pieces in zip(*(extended_contexts + [distractors]))]
             contexts = []
 
