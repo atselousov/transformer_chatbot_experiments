@@ -4,3 +4,10 @@
 checkpoints/*
 parameters/*
 ParlAI/*
+datasets/*
+evaluation_files/*
+metrics/3rdparty/meteor-*
+.vscode
+temp
+__pycache__
+runs/*

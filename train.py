@@ -1,16 +1,52 @@
+import os
 import torch
 import random
-from model.utils import load_openai_weights, set_seed, f1_score
+import logging
+import json
+from tensorboardX import SummaryWriter
+
+from model.utils import load_openai_weights, set_seed, f1_score, open, unicode
 from model.transformer_model import TransformerModel
 from model.trainer import Trainer
 from model.text import BPEVocab
 from model.dataset import FacebookDataset
 from config import get_model_config, get_trainer_config
+from metrics import nlp_metrics
 
+logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
+                    datefmt = '%m/%d/%Y %H:%M:%S',
+                    level = logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Activate this once we have the distributed training setup in place: logging only on main process
+# class DummyWriter:
+#     """ Used for distributed training (from NVIDIA apex example).
+#         A dummy logger used so that only the main process write and log informations.
+#     """
+#     def __init__(self, *input, **kwargs):
+#         pass
+#     def add_scalar(self, *input, **kwargs):
+#         pass
 
 def main():
+    # # Activate this once we have the distributed training setup in place: logging only on main process
+    # if args.local_rank not in [-1, 0]:
+    #     sys.stdout = open(f"./log_distributed_{args.local_rank}", "w")
+    #     writer = DummyWriter()
+    #     logfile = "dummy_file"
+    # else:
+    writer = SummaryWriter()
     model_config = get_model_config()
     trainer_config = get_trainer_config()
+
+    log_dir = writer.log_dir
+    interrupt_checkpoint_path = os.path.join(log_dir, trainer_config.interrupt_checkpoint_path)
+    last_checkpoint_path = os.path.join(log_dir, trainer_config.last_checkpoint_path)
+    logger.info("Logging to {}".format(log_dir))  # Let's save everything on an experiment in the ./runs/XXX/directory
+    with open(os.path.join(log_dir, "model_config.json"), "w") as f:
+        json.dump(model_config, f)
+    with open(os.path.join(log_dir, "trainer_config.json"), "w") as f:
+        json.dump(trainer_config, f)
 
     set_seed(trainer_config.seed)
     device = torch.device(trainer_config.device)
@@ -42,14 +78,16 @@ def main():
         load_openai_weights(transformer.transformer_module, 
                             trainer_config.openai_parameters_dir,
                             n_special_tokens=vocab.n_special_tokens)
-        print('OpenAI weights loaded from {}'.format(trainer_config.openai_parameters_dir))
+        logger.info('OpenAI weights loaded from {}'.format(trainer_config.openai_parameters_dir))
 
-    train_dataset = FacebookDataset(trainer_config.train_datasets, vocab, transformer.n_pos_embeddings - 1)
-    test_dataset = FacebookDataset(trainer_config.test_datasets, vocab, transformer.n_pos_embeddings - 1)
+    logger.info('loading datasets')
+    train_dataset = FacebookDataset(trainer_config.train_datasets, vocab, transformer.n_pos_embeddings - 1, cache=trainer_config.train_datasets_cache)
+    test_dataset = FacebookDataset(trainer_config.test_datasets, vocab, transformer.n_pos_embeddings - 1, cache=trainer_config.test_datasets_cache)
 
     model_trainer = Trainer(transformer,
-                            train_dataset, 
-                            test_dataset, 
+                            train_dataset,
+                            writer,
+                            test_dataset,
                             batch_size=trainer_config.batch_size,
                             batch_split=trainer_config.batch_split, 
                             lr=trainer_config.lr, 
@@ -62,14 +100,24 @@ def main():
                             ignore_idxs=vocab.special_tokens_ids)
 
     if trainer_config.load_last:
-        state_dict = torch.load(trainer_config.last_checkpoint_path, map_location=device)
+        state_dict = torch.load(trainer_config.load_last, map_location=device)
         model_trainer.load_state_dict(state_dict)
-        print('Weights loaded from {}'.format(trainer_config.last_checkpoint_path))
-    
+        logger.info('Weights loaded from {}'.format(trainer_config.load_last))
+
 
     # helpers -----------------------------------------------------
+    def external_metrics_func(full_references, full_predictions):
+        with open(os.path.join(writer.log_dir, trainer_config.eval_references_file), 'w', encoding='utf-8') as f:
+            f.write(unicode('\n'.join(full_references)))
+        with open(os.path.join(writer.log_dir, trainer_config.eval_predictions_file), 'w', encoding='utf-8') as f:
+            f.write(unicode('\n'.join(full_predictions)))
+
+        nist, bleu, meteor, entropy, div, avg_len = nlp_metrics([trainer_config.eval_references_file],
+                                                                trainer_config.eval_predictions_file)
+        return {'nist': nist, 'bleu': bleu, 'meteor': meteor, 'entropy': entropy, 'div': div, 'avg_len': avg_len}
+
     def save_func(epoch):
-        torch.save(model_trainer.state_dict(), trainer_config.last_checkpoint_path)  
+        torch.save(model_trainer.state_dict(), last_checkpoint_path)
 
     def sample_text_func(epoch):
         n_samples = 5
@@ -86,31 +134,30 @@ def main():
             target_str = vocab.ids2string(target[1:-1])
             prediction_str = vocab.ids2string(prediction)
 
-            print('\n')
-            print('Persona info:\n\t{}'.format(persona_info_str))
-            print('Dialog:{}'.format(dialog_str))
-            print('Target:\n\t{}'.format(target_str))
-            print('Prediction:\n\t{}'.format(prediction_str))
+            logger.info('\n')
+            logger.info('Persona info:\n\t{}'.format(persona_info_str))
+            logger.info('Dialog:{}'.format(dialog_str))
+            logger.info('Target:\n\t{}'.format(target_str))
+            logger.info('Prediction:\n\t{}'.format(prediction_str))
 
     def test_func(epoch):
         if (epoch+1) % trainer_config.test_period == 0:
             metric_funcs = {'f1_score': f1_score}
-            model_trainer.test(metric_funcs)
-    
+            model_trainer.test(metric_funcs, external_metrics_func)
+
     def f1_risk(predictions, targets):
         scores = f1_score(predictions, targets, average=False)
-        return [1-s for s in scores] 
+        return [1-s for s in scores]
 
     # helpers -----------------------------------------------------
-    
+
 
     try:
         model_trainer.train(trainer_config.n_epochs, after_epoch_funcs=[save_func, sample_text_func, test_func], risk_func=f1_risk)
     except (KeyboardInterrupt, Exception, RuntimeError) as e:
-        torch.save(model_trainer.state_dict(), trainer_config.interrupt_checkpoint_path)
+        torch.save(model_trainer.state_dict(), interrupt_checkpoint_path)
         raise e
 
 
 if __name__ == '__main__':
     main()
-

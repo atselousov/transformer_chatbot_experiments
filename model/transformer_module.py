@@ -175,8 +175,8 @@ class TransformerModule(nn.Module):
         self.pos_embeddings = nn.Embedding(n_pos_embeddings + 1, embeddings_size, padding_idx=0)
         self.embed_dropout = nn.Dropout(embed_dropout)
         self.layers = nn.ModuleList([TransformerBlock(embeddings_size, n_heads, dropout, attn_dropout, ff_dropout) for _ in range(n_layers)])
-        self.n_segments = n_segments        
-        
+        self.n_segments = n_segments
+
         self._init_weights()
 
     def _init_weights(self):
