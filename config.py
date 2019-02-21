@@ -24,14 +24,14 @@ def get_model_config():
                        'ff_dropout': default_config.ff_dropout,
                        'normalize_embeddings': True,  # Used in pretrained last checkpoint for ConvAI2
                        'max_seq_len': 256,
-                       'beam_size': 3,
-                       'diversity_coef': 0,
-                       'diversity_groups': 1,
-                       'annealing_topk': None,
-                       'annealing': 0,
+                       'beam_size': env_config('BEAM_SIZE', default=3, cast=int),
+                       'diversity_coef': env_config('DIVERSITY_COEF', default=0, cast=int),
+                       'diversity_groups': env_config('DIVERSITY_GROUP', default=1, cast=int),
+                       'annealing_topk': env_config('ANNEALING_TOPK', default=None),
+                       'annealing': env_config('ANNEALING', default=0, cast=int),
                        'length_penalty': 0.6,
                        'n_segments': None,
-                       'multiple_choice_head': False})
+                       'multiple_choice_head': env_config('MULTIPLE_CHOICE_HEAD', default=False, cast=bool)})
 
     return config
 
@@ -63,8 +63,8 @@ def get_trainer_config():
                        'fp16': env_config('FP16', default=True, cast=bool),
                        'loss_scale': env_config('LOSS_SCALE', default=0, cast=float),
                        'linear_schedule': env_config('LINEAR_SCHEDULE', default=True, cast=bool),
-                       'evaluate_full_sequences': True,
-                       'limit_eval_size': -1,
+                       'evaluate_full_sequences': env_config('EVALUATE_FULL_SEQUENCES', default=True, cast=bool),
+                       'limit_eval_size': env_config('LIMIT_EVAL_TIME', default=-1, cast=int),
                        'limit_train_size': -1,
                        'load_last': '', #./checkpoints/last_checkpoint',  # Now that we save several experiments you can put the path of the checpoint file you want to load here
                        'repo_id': str(repo),
