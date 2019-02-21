@@ -5,7 +5,7 @@ CPU=6
 GPU=1
 MEM=14G
 
-IMAGE="truskovskyi/transformer_chatbot"
+IMAGE="truskovskyi/transformer_chatbot:latest"
 DATA_ROOT="storage://truskovskiyk/convai"
 
 CMD="python train.py"
