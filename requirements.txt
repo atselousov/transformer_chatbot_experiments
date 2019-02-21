@@ -13,3 +13,4 @@ ptvsd
 tensorboardX
 tensorflow
 gitpython
+python-decouple==3.1

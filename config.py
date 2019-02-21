@@ -3,8 +3,11 @@ from copy import deepcopy
 import torch
 from model.utils import openai_transformer_config
 import git
+from decouple import config as env_config
+
 
 repo = git.Repo(search_parent_directories=True)
+
 
 def get_model_config():
     default_config = openai_transformer_config()
@@ -34,8 +37,8 @@ def get_model_config():
 
 
 def get_trainer_config():
-    config = AttrDict({'n_epochs': 3,
-                       'train_batch_size': 256,
+    config = AttrDict({'n_epochs': env_config('N_EPOCHS', default=3, cast=int),
+                       'train_batch_size': env_config('TRAIN_BATCH_SIZE', default=256, cast=int),
                        'batch_split': 64,
                        'test_batch_size': 8,
                        'lr': 6.25e-5,
