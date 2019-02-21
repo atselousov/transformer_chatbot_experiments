@@ -34,7 +34,7 @@ def get_model_config():
 
 
 def get_trainer_config():
-    config = AttrDict({'n_epochs': 1,
+    config = AttrDict({'n_epochs': 3,
                        'train_batch_size': 256,
                        'batch_split': 64,
                        'test_batch_size': 8,
@@ -49,7 +49,7 @@ def get_trainer_config():
                        'single_input': False,
                        'dialog_embeddings': False,
                        'use_start_end': True,
-                       'n_jobs': 0,
+                       'n_jobs': 4,
                        'label_smoothing': 0.1,
                        'clip_grad': None,
                        'test_period': 1,
@@ -63,7 +63,7 @@ def get_trainer_config():
                        'evaluate_full_sequences': True,
                        'limit_eval_size': 256,
                        'limit_train_size': 256,
-                       'load_last': './checkpoints/last_checkpoint',  # Now that we save several experiments you can put the path of the checpoint file you want to load here
+                       'load_last': '', #./checkpoints/last_checkpoint',  # Now that we save several experiments you can put the path of the checpoint file you want to load here
                        'repo_id': str(repo),
                        'repo_sha': str(repo.head.object.hexsha),
                        'repo_branch': str(repo.active_branch),
@@ -73,8 +73,8 @@ def get_trainer_config():
                        'eval_predictions_file': 'eval_predictions_file',
                        'interrupt_checkpoint_path': 'interrupt_checkpoint',  # there are now in the ./runs/XXX/ experiments folders
                        'train_datasets': ['./datasets/ConvAI2/train_self_original_no_cands.txt',],
-                                          # './datasets/ConvAI2/train_self_revised_no_cands.txt',
-                                          # './datasets/DailyDialog/train_dailydialog.txt'],
+                                          './datasets/ConvAI2/train_self_revised_no_cands.txt',
+                                          './datasets/DailyDialog/train_dailydialog.txt'],
                        'train_datasets_cache': './datasets/train_datasets_cache.bin',
                        'test_datasets': ['./datasets/ConvAI2/valid_self_original.txt',],
                                          # './datasets/ConvAI2/valid_self_revised_no_cands.txt',
