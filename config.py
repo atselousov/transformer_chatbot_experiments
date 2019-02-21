@@ -57,7 +57,7 @@ def get_trainer_config():
                        'device': 'cuda',
                        'persona_augment': False,
                        'persona_aug_syn_proba': 0.0,
-                       'fp16': False,
+                       'fp16': True,
                        'loss_scale': 0,
                        'linear_schedule': True,
                        'load_last': '',  # Now that we save several experiments you can put the path of the checpoint file you want to load here
