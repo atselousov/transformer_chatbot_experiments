@@ -132,6 +132,8 @@ class NoamOpt:
             self.optimizer.load_state_dict(state_dict['optimizer'])
         except ValueError as e:
             logger.info("Optimizer cannot be loaded from checkpoint: {}".format(e))
+        except KeyError as e:
+            logger.info("Optimizer cannot be loaded from checkpoint: {}".format(e))
 
     def backward(self, loss):
         if self.fp16:

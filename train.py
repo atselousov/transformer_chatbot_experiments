@@ -15,17 +15,12 @@ from model.dataset import FacebookDataset
 from config import get_model_config, get_trainer_config
 from metrics import nlp_metrics
 
-logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-                    datefmt = '%m/%d/%Y %H:%M:%S',
-                    level = logging.INFO)
-logger = logging.getLogger(__file__)
-
 class DummyWriter:
     """ Used for distributed training (from NVIDIA apex example).
         A dummy logger used so that only the main process write and log informations.
     """
     def __init__(self, *input, **kwargs):
-        self.log_dir = "dummy_file"
+        self.log_dir = "runs/dummy_logs/"
     def add_scalar(self, *input, **kwargs):
         pass
 
@@ -36,7 +31,12 @@ def main():
     parser.add_argument('--server_port', type=str, default='', help="Used for debugging on GPU machine.")
     args = parser.parse_args()
 
-    if args.server_ip and args.server_port:
+    logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
+                        datefmt = '%m/%d/%Y %H:%M:%S',
+                        level = logging.INFO if args.local_rank in [-1, 0] else logging.ERROR)
+    logger = logging.getLogger(__file__)
+
+    if args.server_ip and args.server_port and args.local_rank in [-1, 0]:
         # Distant debugging - see https://code.visualstudio.com/docs/python/debugging#_attach-to-a-local-script
         import ptvsd
         print("Waiting for debugger attach")
@@ -60,10 +60,11 @@ def main():
     interrupt_checkpoint_path = os.path.join(log_dir, trainer_config.interrupt_checkpoint_path)
     last_checkpoint_path = os.path.join(log_dir, trainer_config.last_checkpoint_path)
     logger.info("Logging to {}".format(log_dir))  # Let's save everything on an experiment in the ./runs/XXX/directory
-    with open(os.path.join(log_dir, "model_config.json"), "w") as f:
-        json.dump(model_config, f)
-    with open(os.path.join(log_dir, "trainer_config.json"), "w") as f:
-        json.dump(trainer_config, f)
+    if args.local_rank in [-1, 0]:
+        with open(os.path.join(log_dir, "model_config.json"), "w") as f:
+            json.dump(model_config, f)
+        with open(os.path.join(log_dir, "trainer_config.json"), "w") as f:
+            json.dump(trainer_config, f)
 
     set_seed(trainer_config.seed)
     device = torch.device(trainer_config.device)
@@ -119,7 +120,8 @@ def main():
                                    use_start_end=trainer_config.use_start_end,
                                    negative_samples=-1,  # Keep all negative samples
                                    augment=False,
-                                   aug_syn_proba=0.0)
+                                   aug_syn_proba=0.0,
+                                   limit_size=trainer_config.limit_eval_size)
 
     model_trainer = Trainer(transformer,
                             train_dataset,
@@ -144,7 +146,8 @@ def main():
                             fp16=trainer_config.fp16,
                             loss_scale=trainer_config.loss_scale,
                             linear_schedule=trainer_config.linear_schedule,
-                            n_epochs=trainer_config.n_epochs)
+                            n_epochs=trainer_config.n_epochs,
+                            evaluate_full_sequences=trainer_config.evaluate_full_sequences)
 
     if trainer_config.load_last:
         state_dict = torch.load(trainer_config.load_last, map_location=device)
@@ -175,7 +178,7 @@ def main():
         for persona_info, dialog, target, _ in samples:
             contexts = [torch.tensor([c], dtype=torch.long, device=model_trainer.device) for c in [persona_info, dialog] if len(c) > 0]
             prediction = model_trainer.model.predict(contexts)[0]
-            
+
             persona_info_str = vocab.ids2string(persona_info[1:-1])
             dialog_str = vocab.ids2string(dialog)
             dialog_str = dialog_str.replace(vocab.talker1_bos, '\n\t- ').replace(vocab.talker2_bos, '\n\t- ')

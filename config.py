@@ -3,10 +3,8 @@ from copy import deepcopy
 import torch
 from model.utils import openai_transformer_config
 import git
-import os
 
 repo = git.Repo(search_parent_directories=True)
-
 
 def get_model_config():
     default_config = openai_transformer_config()
@@ -59,9 +57,11 @@ def get_trainer_config():
                        'device': 'cuda',
                        'persona_augment': False,
                        'persona_aug_syn_proba': 0.0,
-                       'fp16': bool(os.getenv("FP16", False)),
+                       'fp16': True,
                        'loss_scale': 0,
                        'linear_schedule': True,
+                       'evaluate_full_sequences': False,
+                       'limit_eval_size': -1,
                        'load_last': '',  # Now that we save several experiments you can put the path of the checpoint file you want to load here
                        'repo_id': str(repo),
                        'repo_sha': str(repo.head.object.hexsha),
