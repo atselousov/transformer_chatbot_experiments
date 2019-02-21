@@ -13,3 +13,9 @@ ptvsd
 tensorboardX
 tensorflow
 gitpython
+dnspython
+aiofiles
+aiohttp
+telepot
+apscheduler
+mongoengine
