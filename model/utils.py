@@ -40,10 +40,21 @@ def set_seed(seed):
     torch.cuda.manual_seed(seed)
     random.seed(seed)
 
+def repeat_along_dim1(obj, repetitions):
+    """ repeat (a possibly nested object of) tensors from (batch, ...) to (batch * repetitions, ...) """
+    if isinstance(obj, tuple):
+        return tuple(repeat_along_dim1(o, repetitions) for o in obj)
+    if isinstance(obj, list):
+        return list(repeat_along_dim1(o, repetitions) for o in obj)
+    tail_dims = obj.shape[1:]
+    obj = obj.unsqueeze(1).repeat([1, repetitions] + [1] * len(tail_dims))
+    return obj.view(-1, *tail_dims)
 
 def pad_sequence(sequences, batch_first=False, padding_value=0):
     # assuming trailing dimensions and type of all the Tensors
     # in sequences are same and fetching those from sequences[0]
+    if not len(sequences):
+        return []
     max_size = sequences[0].size()
     trailing_dims = max_size[1:]
     max_len = max([s.size(0) for s in sequences])

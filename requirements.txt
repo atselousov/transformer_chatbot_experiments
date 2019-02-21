@@ -9,5 +9,7 @@ emoji>=0.5.0
 mosestokenizer>=1.0.0
 language-check>=1.1
 attrdict
+ptvsd
 tensorboardX
+tensorflow
 gitpython

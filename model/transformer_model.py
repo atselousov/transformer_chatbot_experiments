@@ -15,29 +15,59 @@
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import random
+import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from .transformer_module import TransformerModule
+from .utils import repeat_along_dim1
+
+logger = logging.getLogger(__file__)
+
+class MultipleChoiceHead(nn.Module):
+    """ Classifier Head for the transformer """
+
+    def __init__(self, in_features, dropout):
+        super(MultipleChoiceHead, self).__init__()
+        self.dropout = nn.Dropout(dropout)
+        self.linear = nn.Linear(in_features, 1)
+
+        self._init_weights()
+
+    def _init_weights(self):
+        nn.init.normal_(self.linear.weight, std=0.02)
+        nn.init.normal_(self.linear.bias, 0)
+
+    def forward(self, hidden_state, padding_mask):
+        # Get classification logits as the last logit and apply a Linear layer on them
+        # hidden_state (bsz, seq_length, hidden_size)
+        # padding_mask (bsz, seq_length)
+        last_token_idx = torch.sum(~padding_mask, dim=-1) - 1  # (bsz)
+        last_token_idx = last_token_idx.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, hidden_state.size(-1))  # (bsz, 1, hidden_size)
+        multiple_choice_h = hidden_state.gather(dim=-2, index=last_token_idx).squeeze(-2)  # (bsz, hidden_size)
+        multiple_choice_logits = self.linear(multiple_choice_h).squeeze(-1)  # (bsz)
+        return multiple_choice_logits
 
 
 class TransformerModel(nn.Module):
     def __init__(self, n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
                  padding_idx, n_heads, dropout, embed_dropout, attn_dropout, ff_dropout,
-                 bos_id, eos_id, max_seq_len=256, beam_size=5, sample=False,
-                 length_penalty=0.8, annealing_topk=None, annealing=0, 
-                 diversity_coef=0, diversity_groups=1, n_segments=None):
+                 bos_id, eos_id, sent_dialog_id, max_seq_len=256, beam_size=5, sample=False,
+                 length_penalty=0.8, annealing_topk=None, annealing=0, normalize_embeddings=True,
+                 diversity_coef=0, diversity_groups=1, n_segments=None, multiple_choice_head=False,
+                 single_input=False, dialog_embeddings=False, vocab=None):
 
         super(TransformerModel, self).__init__()
 
-        self.padding_idx = padding_idx
         self.n_embeddings = n_embeddings
         self.n_pos_embeddings = n_pos_embeddings
         self.embeddings_size = embeddings_size
 
         self.bos_id = bos_id
+        self.padding_idx = padding_idx
         self.eos_id = eos_id
+        self.sent_dialog_id = sent_dialog_id
 
         self.max_seq_len = max_seq_len
         self.beam_size = beam_size
@@ -48,29 +78,49 @@ class TransformerModel(nn.Module):
         self.diversity_coef = diversity_coef
         self.diversity_groups = diversity_groups
 
+        self.single_input = single_input
+        self.dialog_embeddings = dialog_embeddings
+
+        self.vocab = vocab
+
         self.transformer_module = TransformerModule(n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
                                                     padding_idx, n_heads, dropout, embed_dropout, attn_dropout,
-                                                    ff_dropout, n_segments)
+                                                    ff_dropout, normalize_embeddings, n_segments)
         self.pre_softmax = nn.Linear(embeddings_size, n_embeddings, bias=False)
         self.pre_softmax.weight = self.transformer_module.embeddings.weight
+        self.multiple_choice_head = MultipleChoiceHead(self.embeddings_size, dropout) if multiple_choice_head else None
 
     def forward(self, x, contexts=[]):
         enc_contexts = [self.encode(c) for c in contexts]
         return self.decode(x, enc_contexts)
 
     def encode(self, x):
-        return self.transformer_module(x)
+        " Returns a tuple(x, padding_mask)"
+        x, padding_mask, _ = self.transformer_module(x)
+        return x, padding_mask
 
     def generate(self, enc_x):
         return self.pre_softmax(enc_x)
 
+    def classify(self, x, padding_mask):
+        return self.multiple_choice_head(x, padding_mask)
+
+    def decode_classify(self, x, enc_contexts=[]):
+        x, padding_mask, _ = self.transformer_module(x, enc_contexts)
+        return self.classify(x, padding_mask)
+
     def decode(self, x, enc_contexts=[]):
-        x, _ = self.transformer_module(x, enc_contexts)
+        x, _, _ = self.transformer_module(x, enc_contexts)
         return self.generate(x)
 
     def predict(self, contexts=[]):
-        enc_contexts = [self.encode(c) for c in contexts]
-        prediction = self.beam_search(enc_contexts)
+        if self.single_input:
+            enc_contexts = []
+            beam_starts = torch.cat(contexts, dim=1)
+        else:
+            enc_contexts = [self.encode(c) for c in contexts]
+            beam_starts = None
+        prediction = self.beam_search(enc_contexts=enc_contexts, beam_starts=beam_starts)
 
         return prediction
 
@@ -78,34 +128,38 @@ class TransformerModel(nn.Module):
         """https://arxiv.org/abs/1609.08144"""
         return (5 + sequence_lengths) ** self.length_penalty_coef / (5 + 1) ** self.length_penalty_coef
 
-    def beam_search(self, enc_contexts=[], return_beams=False):
+    def beam_search(self, enc_contexts=[], return_beams=False, beam_starts=None):
         with torch.no_grad():
-            if len(enc_contexts) == 0:
+            if len(enc_contexts) == 0 and beam_starts is None:
                 return []
 
-            batch_size = enc_contexts[0][0].shape[0]
+            batch_size = enc_contexts[0][0].shape[0] if beam_starts is None else beam_starts.shape[0]
             device = next(self.parameters()).device
 
             prevs = torch.full((batch_size * self.beam_size, 1), fill_value=self.bos_id, dtype=torch.long, device=device)
-            
+
             beam_scores = torch.zeros(batch_size, self.beam_size, device=device)
             beam_lens = torch.ones(batch_size, self.beam_size, dtype=torch.long, device=device)
             is_end = torch.zeros(batch_size, self.beam_size, dtype=torch.uint8, device=device)
 
-            beam_enc_contexts = []
-            for c, p in enc_contexts:
-                c = c.unsqueeze(1).repeat(1, self.beam_size, 1, 1)
-                c = c.view(-1, c.shape[2], c.shape[3])
-                p = p.unsqueeze(1).repeat(1, self.beam_size, 1)
-                p = p.view(-1, p.shape[2])
-                beam_enc_contexts.append((c, p))
-            
+            if beam_starts is not None:
+                beam_starts = repeat_along_dim1(beam_starts, self.beam_size)
+            beam_enc_contexts = repeat_along_dim1(enc_contexts, self.beam_size)
+
             current_sample_prob = 1
             group_size = self.beam_size // self.diversity_groups
             diversity_penalty = torch.zeros((batch_size, self.n_embeddings), device=device)
+            past = None
 
-            for i in range(self.max_seq_len):
-                outputs, _ = self.transformer_module(prevs, beam_enc_contexts)
+            max_seq_len = min(self.n_pos_embeddings - prevs.shape[1] - (beam_starts.shape[1] if beam_starts is not None else 0),
+                              self.max_seq_len)
+            for i in range(max_seq_len):
+                inputs = prevs if past is None else prevs[:, -1:, ...]  # only use the last token (rest is in past)
+                if self.dialog_embeddings and inputs.dim() < 3:
+                    inputs = torch.stack((inputs, torch.full_like(inputs, self.sent_dialog_id)), dim=inputs.dim())
+                if i == 0 and beam_starts is not None:
+                    inputs = torch.cat((beam_starts, inputs), dim=1)
+                outputs, _, past = self.transformer_module(inputs, beam_enc_contexts, past=past)
 
                 logits = self.generate(outputs[:, -1, :])
                 log_probs = F.log_softmax(logits, dim=-1)
@@ -163,6 +217,11 @@ class TransformerModel(nn.Module):
                 sym_idxs = torch.fmod(idxs, log_probs.shape[-1])
                 is_end = torch.gather(is_end, 1, beam_idxs)
                 beam_lens = torch.gather(beam_lens, 1, beam_idxs)
+
+                if self.vocab is not None:
+                    logger.info('\nbeams:\n' + '\n'.join(self.vocab.ids2string(t.detach().cpu().tolist()) for t in prevs))
+                    logger.info('\ntop-options:\n' + '\n'.join(self.vocab.ids2string(t.detach().cpu().tolist())
+                                + str(bi.detach().cpu().tolist()) for t, bi in zip(sym_idxs, beam_idxs)))
 
                 sym_idxs[is_end] = self.padding_idx
                 beam_lens[~is_end] += 1

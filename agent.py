@@ -60,7 +60,6 @@ class TransformerAgent(Agent):
 
         self.clean_emoji = self.opt['clean_emoji']
         self.check_grammar = self.opt['check_grammar']
-
         # 'max_seq_len': 128,
         # 'beam_size': 1,
         # 'diversity_coef': 0,
@@ -68,6 +67,8 @@ class TransformerAgent(Agent):
         # 'annealing_topk': None,
         # 'annealing': 0,
         # 'length_penalty': 0.6,
+
+        self.vocab = BPEVocab.from_files(model_config.bpe_vocab_path, model_config.bpe_codes_path)
 
         if self.opt['annealing_topk'] is not None:
             assert self.opt['annealing_topk'] > self.opt['beam_size']

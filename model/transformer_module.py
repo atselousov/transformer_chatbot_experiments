@@ -16,18 +16,28 @@
 
 import math
 import torch
+import logging
 import torch.nn as nn
 import torch.nn.functional as F
 from .utils import checkpoint_sequential
 
+logger = logging.getLogger(__file__)
+
+try:
+    from apex.normalization.fused_layer_norm import FusedLayerNorm as LayerNorm
+except ImportError:
+    print("Better speed can be achieved with apex installed from https://www.github.com/nvidia/apex.")
+    from torch.nn import LayerNorm
 
 class MultiheadAttention(nn.Module):
     @classmethod
     def _get_future_mask(cls, size, device):
-        if not hasattr(cls, '_future_mask') or cls._future_mask.device != device or cls._future_mask.shape < size:
-            cls._future_mask = torch.triu(torch.ones(size[0], size[1], dtype=torch.uint8, device=device), 1)
+        nd, ns = size
+        max_size = max(nd, ns)
+        if not hasattr(cls, '_future_mask') or cls._future_mask.device != device or any(s<max_size for s in cls._future_mask.shape):
+            cls._future_mask = torch.triu(torch.ones(max_size, max_size, dtype=torch.uint8, device=device), 1)
 
-        mask = cls._future_mask[:size[0], :size[1]]
+        mask = cls._future_mask[ns-nd:ns, :ns]  # future mask when we already may have past pre-computed values: take a slice at the end of the mask
 
         return mask
 
@@ -59,7 +69,7 @@ class MultiheadAttention(nn.Module):
         if apply_future_mask:
             future_mask = MultiheadAttention._get_future_mask(w.shape[-2:], w.device).unsqueeze(0).unsqueeze(0)
             w.masked_fill_(future_mask, float('-inf'))
-        
+
         if padding_mask is not None:
             w.masked_fill_(padding_mask.unsqueeze(1).unsqueeze(2), float('-inf'))
 
@@ -79,21 +89,34 @@ class MultiheadAttention(nn.Module):
 
         return x
 
-    def forward(self, query, key, value, padding_mask):
+    def forward(self, query, key, value, padding_mask, attn_past_kv=None, attn_past_q=None):
         qkv_same = (query.data_ptr() == key.data_ptr() == value.data_ptr())
         kv_same = (key.data_ptr() == value.data_ptr())
 
         if qkv_same:
             query, key, value = self.qkv_proj(query).split(self.n_features, dim=-1)
             apply_future_mask = True  # self-attention
+            if attn_past_kv is not None:  # we have already computed part of key, value of this
+                past_key, past_value = attn_past_kv[0], attn_past_kv[1]
+                key = torch.cat((past_key, key), dim=-2)
+                value = torch.cat((past_value, value), dim=-2)
         elif kv_same:
-            q_w, q_b = self.qkv_proj.weight[:self.n_features, :], self.qkv_proj.bias[:self.n_features]
-            query = F.linear(query, q_w, q_b)
-            kv_w, kv_b = self.qkv_proj.weight[self.n_features:, :], self.qkv_proj.bias[self.n_features:]
-            key, value = F.linear(key, kv_w, kv_b).split(self.n_features, dim=-1)
+            if attn_past_q is not None:  # we have already computed this query
+                query = attn_past_q
+            else:
+                q_w, q_b = self.qkv_proj.weight[:self.n_features, :], self.qkv_proj.bias[:self.n_features]
+                query = F.linear(query, q_w, q_b)
+            if attn_past_kv is not None:  # we have already computed key, value of this
+                key, value = attn_past_kv[0], attn_past_kv[1]
+            else:
+                kv_w, kv_b = self.qkv_proj.weight[self.n_features:, :], self.qkv_proj.bias[self.n_features:]
+                key, value = F.linear(key, kv_w, kv_b).split(self.n_features, dim=-1)
             apply_future_mask = False
         else:
             assert False
+
+        save_key_value = (key, value)
+        save_query = query
 
         query = self._split_heads(query)
         key = self._split_heads(key, is_key=True)
@@ -104,7 +127,7 @@ class MultiheadAttention(nn.Module):
 
         x = self.out_proj(x)
 
-        return x
+        return x, save_key_value, save_query # we can reuse: key/value for next forward steps, query for next attention ops
 
 
 class FeedForward(nn.Module):
@@ -138,21 +161,26 @@ class TransformerBlock(nn.Module):
         super(TransformerBlock, self).__init__()
 
         self.attn = MultiheadAttention(n_features, n_heads, attn_dropout)
-        self.attn_norm = nn.LayerNorm(n_features)
+        self.attn_norm = LayerNorm(n_features)
         self.ff = FeedForward(n_features, 4 * n_features, ff_dropout)
-        self.ff_norm = nn.LayerNorm(n_features)
+        self.ff_norm = LayerNorm(n_features)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x, padding_mask, *contexts):
+    def forward(self, x, padding_mask, *contexts, layer_past=None):
         '''contexts = [(context1, padding_mask1), ...]'''
 
         inputs = (x, padding_mask) + contexts
 
         full_attn = 0
         n_attn = len(inputs) // 2
-        for i in range(0, len(inputs), 2):
+        save_kv = []
+        query = None
+        if layer_past is None:
+            layer_past = [None] * n_attn
+        for i, attn_past_kv in zip(range(0, len(inputs), 2), layer_past):
             c, m = inputs[i], inputs[i+1].byte()
-            a = self.attn(x, c, c, m)
+            a, key_value, query = self.attn(x, c, c, m, attn_past_kv=attn_past_kv, attn_past_q=query)
+            save_kv.append(key_value)
             full_attn += (a / n_attn)
 
         full_attn = self.dropout(full_attn)
@@ -162,13 +190,13 @@ class TransformerBlock(nn.Module):
         f = self.dropout(f)
         x = self.ff_norm(x + f)
 
-        return (x, padding_mask) + contexts
+        return (x, padding_mask) + contexts + (save_kv,)
 
 
 class TransformerModule(nn.Module):
     def __init__(self, n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
-                 padding_idx, n_heads, dropout, embed_dropout, attn_dropout, ff_dropout, 
-                 n_segments=None):
+                 padding_idx, n_heads, dropout, embed_dropout, attn_dropout, ff_dropout,
+                 normalize_embeddings, n_segments=None):
         super(TransformerModule, self).__init__()
 
         self.embeddings = nn.Embedding(n_embeddings, embeddings_size, padding_idx=padding_idx)
@@ -176,6 +204,7 @@ class TransformerModule(nn.Module):
         self.embed_dropout = nn.Dropout(embed_dropout)
         self.layers = nn.ModuleList([TransformerBlock(embeddings_size, n_heads, dropout, attn_dropout, ff_dropout) for _ in range(n_layers)])
         self.n_segments = n_segments
+        self.normalize_embeddings = normalize_embeddings
 
         self._init_weights()
 
@@ -183,13 +212,25 @@ class TransformerModule(nn.Module):
         nn.init.normal_(self.embeddings.weight, std=0.02)
         nn.init.normal_(self.pos_embeddings.weight, std=0.02)
 
-    def forward(self, x, enc_contexts=[]):
-        padding_mask = x.eq(self.embeddings.padding_idx)
+    def forward(self, x, enc_contexts=[], past=None):
+        # x.dim() == 3 if we have additional dialog embeddings else x.dim() == 2
+        if past is None: # past store previously computed keys/values for the current generated sentence
+            past_length = 0
+            past = [None] * len(self.layers)
+        else:
+            past_length = past[0][0][0].size(-2)  # layer 0, attn ops 0, key (0)
 
-        positions = torch.cumsum(~padding_mask, dim=-1, dtype=torch.long)
+        padding_mask = (x[:, :, 0] if x.dim() == 3 else x).eq(self.embeddings.padding_idx)
+
+        positions = torch.cumsum(~padding_mask, dim=-1, dtype=torch.long) + past_length
         positions.masked_fill_(padding_mask, self.pos_embeddings.padding_idx)
-        
-        x = self.embeddings(x) * math.sqrt(self.embeddings.embedding_dim) + self.pos_embeddings(positions)
+
+        x = self.embeddings(x)
+        if x.dim() == 4: # additional dialog embeddings
+            x = x.sum(dim=-2)
+        if self.normalize_embeddings:
+            x = x * math.sqrt(self.embeddings.embedding_dim)  # Used in pretrained last checkpoint for ConvAI2
+        x = x + self.pos_embeddings(positions)
         x = self.embed_dropout(x)
 
         enc_contexts = sum(enc_contexts, ())
@@ -200,8 +241,10 @@ class TransformerModule(nn.Module):
             out = checkpoint_sequential(self.layers, self.n_segments, x, padding_mask, *enc_contexts)
             x = out[0]
         else:
-            for layer in self.layers:
-                out = layer(x, padding_mask, *enc_contexts)
+            save_key_values = []
+            for layer, layer_past in zip(self.layers, past):
+                out = layer(x, padding_mask, *enc_contexts, layer_past=layer_past)
                 x = out[0]
-        
-        return x, padding_mask
+                save_key_values.append(out[-1])
+
+        return x, padding_mask, save_key_values
