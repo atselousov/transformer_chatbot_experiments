@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# TODO mix .sh scripts and makefile (Rauf 22.02.2019)
 
 IMAGE="registry-staging.neu.ro/rauf-kurbanov/transformer_chatbot"
 DATA_ROOT="storage://rauf-kurbanov/transformer_chatbot"
