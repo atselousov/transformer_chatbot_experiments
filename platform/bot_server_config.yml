@@ -1,0 +1,23 @@
+mongo_uri: mongodb+srv://admin:admin@cluster0-tgclb.mongodb.net/convai
+
+facebook: False
+
+telegram:
+  webhook: https://job-51f3e5c2-a48b-4c6f-906d-588537ca0997.jobs.platform.staging.neuromation.io/bot779933153:AAFi593HhCA_LlvOdFKU20yxJJ-Lq7X2FOw/getUpdates
+  token: 779933153:AAFi593HhCA_LlvOdFKU20yxJJ-Lq7X2FOw
+
+dialog:
+  max_time_in_lobby: 300
+  human_bot_ratio: 1.0
+  inactivity_timeout: 600
+  max_length: 1000
+  evaluation_score_from: 1
+  evaluation_score_to: 5
+  n_bad_messages_in_a_row_threshold: 10
+  guess_profile_sentence_by_sentence: false
+  allow_set_bot: false
+  reveal_dialog_id: false
+
+logging:
+  root_path: ~/log/convai-router
+  base_level: DEBUG
