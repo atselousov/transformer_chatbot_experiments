@@ -5,21 +5,23 @@ CPU=6
 GPU=1
 MEM=14G
 
-IMAGE="truskovskyi/transformer_chatbot:ed2a10cd250c11c145f030a08e139b914f9eb5d3"
+IMAGE="truskovskyi/transformer_chatbot:a6cb6a1957834c8c591fa0a5e566c631b5070d60"
 DATA_ROOT="storage://truskovskiyk/convai"
 
 CMD="python train.py"
-
+DESCRIPTION="experiment #1"
+CONFIGURATION="./platform/configurations/experiment1"
 
 neuro job submit \
         --cpu ${CPU} --gpu ${GPU} --memory ${MEM} --gpu-model nvidia-tesla-v100 \
         --http 8080 --ssh 22  \
-        -e FP16=True \
         --volume ${DATA_ROOT}/meteor-1.5/:/workspace/meteor-1.5:rw \
         --volume ${DATA_ROOT}/datasets/:/workspace/datasets:rw \
         --volume ${DATA_ROOT}/parameters:/workspace/parameters:rw \
         --volume ${DATA_ROOT}/runs/:/workspace/runs:rw \
         --non-preemptible \
+        --description ${DESCRIPTION} \
+        --env-file ${CONFIGURATION} \
         ${IMAGE} \
         "${CMD}"
 
