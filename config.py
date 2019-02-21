@@ -60,7 +60,7 @@ def get_trainer_config():
                        'fp16': True,
                        'loss_scale': 0,
                        'linear_schedule': True,
-                       'evaluate_full_sequences': False,
+                       'evaluate_full_sequences': True,
                        'limit_eval_size': 256,
                        'limit_train_size': 256,
                        'load_last': './checkpoints/last_checkpoint',  # Now that we save several experiments you can put the path of the checpoint file you want to load here
