@@ -2,7 +2,6 @@ mongo_uri: mongodb+srv://admin:admin@cluster0-tgclb.mongodb.net/convai
 
 facebook: False
 
-telegram: False
 telegram:
   webhook: https://job-51f3e5c2-a48b-4c6f-906d-588537ca0997.jobs.platform.staging.neuromation.io/bot779933153:AAFi593HhCA_LlvOdFKU20yxJJ-Lq7X2FOw/getUpdates
   token: 779933153:AAFi593HhCA_LlvOdFKU20yxJJ-Lq7X2FOw
