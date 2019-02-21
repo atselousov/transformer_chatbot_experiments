@@ -72,14 +72,14 @@ def get_trainer_config():
                        'eval_references_file': 'eval_references_file',
                        'eval_predictions_file': 'eval_predictions_file',
                        'interrupt_checkpoint_path': 'interrupt_checkpoint',  # there are now in the ./runs/XXX/ experiments folders
-                       'train_datasets': ['./datasets/ConvAI2/train_self_original_no_cands.txt',],
+                       'train_datasets': ['./datasets/ConvAI2/train_self_original_no_cands.txt',
                                           './datasets/ConvAI2/train_self_revised_no_cands.txt',
                                           './datasets/DailyDialog/train_dailydialog.txt'],
-                       'train_datasets_cache': './datasets/train_datasets_cache.bin',
+                       'train_datasets_cache': '',
                        'test_datasets': ['./datasets/ConvAI2/valid_self_original.txt',],
                                          # './datasets/ConvAI2/valid_self_revised_no_cands.txt',
                                          # './datasets/DailyDialog/valid_dailydialog.txt'],
-                       'test_datasets_cache': './datasets/test_datasets_cache.bin'})
+                       'test_datasets_cache': ''})
 
     local_config = deepcopy(config)
     local_config.train_batch_size = 2
