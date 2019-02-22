@@ -35,17 +35,19 @@ class ConstantPositionalEmbedding(nn.Module):
         super(ConstantPositionalEmbedding, self).__init__()
 
         self._embedding_dim = embedding_dim
-        self.register_buffer('_position_embedding', None)
+        self.register_buffer('_position_embedding',
+                             ConstantPositionalEmbedding.get_embedding(1024,
+                                                                       self._embedding_dim))
 
     @classmethod
-    def get_embedding(cls, seq_len, embedding_dim):
+    def get_embedding(cls, seq_len, embedding_dim, device=None):
         seq_len += 1
 
         half_dim = embedding_dim // 2
 
         emb = math.log(10000) / (half_dim - 1)
-        emb = torch.exp(torch.arange(half_dim, dtype=torch.float32) * -emb)
-        emb = torch.arange(seq_len, dtype=torch.float32).unsqueeze(1) * emb.unsqueeze(0)
+        emb = torch.exp(torch.arange(half_dim, dtype=torch.float32, device=device) * -emb)
+        emb = torch.arange(seq_len, dtype=torch.float32, device=device).unsqueeze(1) * emb.unsqueeze(0)
         emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1).view(seq_len, -1)
 
         if embedding_dim % 2:
@@ -58,11 +60,13 @@ class ConstantPositionalEmbedding(nn.Module):
 
         cur_seq_len = max(seq_len, torch.max(positions).item())
 
-        if self._position_embedding is None or cur_seq_len >= self._position_embedding.size(0):
-            self._position_embedding = ConstantPositionalEmbedding.get_embedding(cur_seq_len, self._embedding_dim)
+        if cur_seq_len >= self._position_embedding.size(0):
+            self._position_embedding = ConstantPositionalEmbedding.get_embedding(cur_seq_len,
+                                                                                 self._embedding_dim,
+                                                                                 positions.device)
 
-        return self._position_embedding.index_select(0, positions.view(-1)).view(batch_size,
-                                                                                 seq_len, -1).to(positions.device)
+        return self._position_embedding.index_select(0, positions.view(-1)).view(batch_size, seq_len, -1)
+
 
 class MultiheadAttention(nn.Module):
     @classmethod
@@ -238,9 +242,10 @@ class TransformerModule(nn.Module):
 
         self.embeddings = nn.Embedding(n_embeddings, embeddings_size, padding_idx=padding_idx)
         if self._constant_embedding:
-            self.const_pos_embeddings = ConstantPositionalEmbedding(embeddings_size)
+            self.pos_embeddings = ConstantPositionalEmbedding(embeddings_size)
         else:
             self.pos_embeddings = nn.Embedding(n_pos_embeddings + 1, embeddings_size, padding_idx=0)
+
         self.embed_dropout = nn.Dropout(embed_dropout)
         self.layers = nn.ModuleList([TransformerBlock(embeddings_size, n_heads, dropout, attn_dropout, ff_dropout) for _ in range(n_layers)])
         self.n_segments = n_segments
@@ -250,7 +255,8 @@ class TransformerModule(nn.Module):
 
     def _init_weights(self):
         nn.init.normal_(self.embeddings.weight, std=0.02)
-        nn.init.normal_(self.pos_embeddings.weight, std=0.02)
+        if isinstance(self.pos_embeddings, nn.Embedding):
+            nn.init.normal_(self.pos_embeddings.weight, std=0.02)
 
     def forward(self, x, enc_contexts=[], past=None):
         # x.dim() == 3 if we have additional dialog embeddings else x.dim() == 2
@@ -271,10 +277,7 @@ class TransformerModule(nn.Module):
         if self.normalize_embeddings:
             x = x * math.sqrt(self.embeddings.embedding_dim)  # Used in pretrained last checkpoint for ConvAI2
 
-        if self._constant_embedding:
-            x += self.const_pos_embeddings(positions)
-        else:
-            x += self.pos_embeddings(positions)
+        x += self.pos_embeddings(positions)
         x = self.embed_dropout(x)
 
         enc_contexts = sum(enc_contexts, ())

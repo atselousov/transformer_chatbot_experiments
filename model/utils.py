@@ -23,6 +23,7 @@ import random
 from collections import namedtuple, Counter
 
 import torch
+import torch.nn as nn
 import numpy as np
 from scipy.interpolate import RectBivariateSpline
 from torch.utils.checkpoint import checkpoint
@@ -152,7 +153,7 @@ def load_openai_weights(model, directory, n_special_tokens=0):
 
     parameters_weights[1] = parameters_weights[1][1:] # skip 0 - <unk> 
 
-    if hasattr(model, 'pos_embeddings'):
+    if isinstance(model.pos_embeddings, nn.Embedding):
         if model.pos_embeddings.num_embeddings - 1 > parameters_weights[0].shape[0]:
             xx = np.linspace(0, parameters_weights[0].shape[0], model.pos_embeddings.num_embeddings - 1)
             new_kernel = RectBivariateSpline(np.arange(parameters_weights[0].shape[0]),
