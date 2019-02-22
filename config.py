@@ -3,8 +3,11 @@ from copy import deepcopy
 import torch
 from model.utils import openai_transformer_config
 import git
+from decouple import config as env_config
+
 
 repo = git.Repo(search_parent_directories=True)
+
 
 def get_model_config():
     default_config = openai_transformer_config()
@@ -21,47 +24,48 @@ def get_model_config():
                        'ff_dropout': default_config.ff_dropout,
                        'normalize_embeddings': True,  # Used in pretrained last checkpoint for ConvAI2
                        'max_seq_len': 256,
-                       'beam_size': 3,
-                       'diversity_coef': 0,
-                       'diversity_groups': 1,
-                       'annealing_topk': None,
-                       'annealing': 0,
+                       'beam_size': env_config('BEAM_SIZE', default=3, cast=int),
+                       'diversity_coef': env_config('DIVERSITY_COEF', default=0, cast=int),
+                       'diversity_groups': env_config('DIVERSITY_GROUP', default=1, cast=int),
+                       'annealing_topk': env_config('ANNEALING_TOPK', default=None),
+                       'annealing': env_config('ANNEALING', default=0, cast=float),
                        'length_penalty': 0.6,
                        'n_segments': None,
-                       'multiple_choice_head': False})
-
+                       'multiple_choice_head': env_config('MULTIPLE_CHOICE_HEAD', default=False, cast=bool)})
+    if config.annealing_topk is not None:
+        config.annealing_topk = int(config.annealing_topk)
     return config
 
 
 def get_trainer_config():
-    config = AttrDict({'n_epochs': 3,
-                       'train_batch_size': 256,
-                       'batch_split': 64,
-                       'test_batch_size': 8,
+    config = AttrDict({'n_epochs': env_config('N_EPOCHS', default=3, cast=int),
+                       'train_batch_size': env_config('TRAIN_BATCH_SIZE', default=256, cast=int),
+                       'batch_split': env_config('BATCH_SPLIT', default=64, cast=int),
+                       'test_batch_size': env_config('TEST_BATCH_SIZE', default=8, cast=int),
                        'lr': 6.25e-5,
                        'lr_warmup': 0.002,  # a fraction of total training (epoch * train_set_length) if linear_schedule == True
                        'weight_decay': 0.01,
-                       's2s_weight': 1,
-                       'lm_weight': 0.5,
-                       'risk_weight': 0,
-                       'hits_weight': 0,
-                       'negative_samples': 0,
-                       'single_input': False,
-                       'dialog_embeddings': False,
-                       'use_start_end': True,
+                       's2s_weight': env_config('S2S_WEIGHT', default=1, cast=float),
+                       'lm_weight': env_config('LM_WEIGHT', default=0.5, cast=float),
+                       'risk_weight': env_config('RISK_WEIGHT', default=0, cast=float),
+                       'hits_weight': env_config('HITS_WEIGHT', default=0, cast=float),
+                       'negative_samples': env_config('NEGATIVE_SAMPLES', default=0, cast=int),
+                       'single_input': env_config('SINGLE_INPUT', default=False, cast=bool),
+                       'dialog_embeddings': env_config('DIALOG_EMBEDDINGS', default=False, cast=bool),
+                       'use_start_end': env_config('USE_START_END', default=True, cast=bool),
                        'n_jobs': 4,
-                       'label_smoothing': 0.1,
+                       'label_smoothing': env_config('LABEL_SMOOTHING', default=0.1, cast=float),
                        'clip_grad': None,
                        'test_period': 1,
                        'seed': 0,
                        'device': 'cuda',
-                       'persona_augment': False,
-                       'persona_aug_syn_proba': 0.0,
-                       'fp16': True,
-                       'loss_scale': 0,
-                       'linear_schedule': True,
-                       'evaluate_full_sequences': True,
-                       'limit_eval_size': -1,
+                       'persona_augment': env_config('PERSONA_AUGMENT', default=False, cast=bool),
+                       'persona_aug_syn_proba': env_config('PERSONA_AUG_SYN_PROBA', default=0.0, cast=float),
+                       'fp16': env_config('FP16', default=True, cast=bool),
+                       'loss_scale': env_config('LOSS_SCALE', default=0, cast=float),
+                       'linear_schedule': env_config('LINEAR_SCHEDULE', default=True, cast=bool),
+                       'evaluate_full_sequences': env_config('EVALUATE_FULL_SEQUENCES', default=True, cast=bool),
+                       'limit_eval_size': env_config('LIMIT_EVAL_TIME', default=-1, cast=int),
                        'limit_train_size': -1,
                        'load_last': '', #./checkpoints/last_checkpoint',  # Now that we save several experiments you can put the path of the checpoint file you want to load here
                        'repo_id': str(repo),

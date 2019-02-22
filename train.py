@@ -35,7 +35,6 @@ def main():
                         datefmt = '%m/%d/%Y %H:%M:%S',
                         level = logging.INFO if args.local_rank in [-1, 0] else logging.ERROR)
     logger = logging.getLogger(__file__)
-
     if args.server_ip and args.server_port and args.local_rank in [-1, 0]:
         # Distant debugging - see https://code.visualstudio.com/docs/python/debugging#_attach-to-a-local-script
         import ptvsd
@@ -55,7 +54,6 @@ def main():
 
     logger.info("model config: {}".format(model_config))
     logger.info("trainer config: {}".format(trainer_config))
-
     log_dir = writer.log_dir
     interrupt_checkpoint_path = os.path.join(log_dir, trainer_config.interrupt_checkpoint_path)
     last_checkpoint_path = os.path.join(log_dir, trainer_config.last_checkpoint_path)
