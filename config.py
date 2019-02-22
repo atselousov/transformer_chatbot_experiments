@@ -28,7 +28,8 @@ def get_model_config():
                        'annealing': 0,
                        'length_penalty': 0.6,
                        'n_segments': None,
-                       'multiple_choice_head': False})
+                       'multiple_choice_head': False,
+                       'constant_embedding': False})
 
     return config
 

@@ -231,12 +231,16 @@ class TransformerBlock(nn.Module):
 class TransformerModule(nn.Module):
     def __init__(self, n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
                  padding_idx, n_heads, dropout, embed_dropout, attn_dropout, ff_dropout,
-                 normalize_embeddings, n_segments=None):
+                 normalize_embeddings, n_segments=None, constant_embedding=False):
         super(TransformerModule, self).__init__()
 
+        self._constant_embedding = constant_embedding
+
         self.embeddings = nn.Embedding(n_embeddings, embeddings_size, padding_idx=padding_idx)
-        self.pos_embeddings = nn.Embedding(n_pos_embeddings + 1, embeddings_size, padding_idx=0)
-        self.const_pos_embeddings = ConstantPositionalEmbedding(embeddings_size)
+        if self._constant_embedding:
+            self.const_pos_embeddings = ConstantPositionalEmbedding(embeddings_size)
+        else:
+            self.pos_embeddings = nn.Embedding(n_pos_embeddings + 1, embeddings_size, padding_idx=0)
         self.embed_dropout = nn.Dropout(embed_dropout)
         self.layers = nn.ModuleList([TransformerBlock(embeddings_size, n_heads, dropout, attn_dropout, ff_dropout) for _ in range(n_layers)])
         self.n_segments = n_segments
@@ -266,8 +270,11 @@ class TransformerModule(nn.Module):
             x = x.sum(dim=-2)
         if self.normalize_embeddings:
             x = x * math.sqrt(self.embeddings.embedding_dim)  # Used in pretrained last checkpoint for ConvAI2
-        x = x + self.pos_embeddings(positions)
-        x += self.const_pos_embeddings(positions)
+
+        if self._constant_embedding:
+            x += self.const_pos_embeddings(positions)
+        else:
+            x += self.pos_embeddings(positions)
         x = self.embed_dropout(x)
 
         enc_contexts = sum(enc_contexts, ())
