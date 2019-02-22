@@ -29,6 +29,46 @@ except ImportError:
     print("Better speed can be achieved with apex installed from https://www.github.com/nvidia/apex.")
     from torch.nn import LayerNorm
 
+
+class ConstantPositionalEmbedding(nn.Module):
+    def __init__(self, embedding_dim, padding_idx):
+        super(ConstantPositionalEmbedding, self).__init__()
+
+        self.embedding_dim = embedding_dim
+        self.padding_idx = padding_idx
+        self.register_buffer('_position_embedding',
+                             ConstantPositionalEmbedding.get_embedding(1024,
+                                                                       self.embedding_dim))
+
+    @classmethod
+    def get_embedding(cls, seq_len, embedding_dim, device=None):
+        seq_len += 1
+
+        half_dim = embedding_dim // 2
+
+        emb = math.log(10000) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, dtype=torch.float32, device=device) * -emb)
+        emb = torch.arange(seq_len, dtype=torch.float32, device=device).unsqueeze(1) * emb.unsqueeze(0)
+        emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1).view(seq_len, -1)
+
+        if embedding_dim % 2:
+            emb = torch.cat([emb, torch.zeros(seq_len, 1)], dim=1)
+
+        return emb
+
+    def forward(self, positions):
+        batch_size, seq_len = positions.size()
+
+        cur_seq_len = max(seq_len, torch.max(positions).item())
+
+        if cur_seq_len >= self._position_embedding.size(0):
+            self._position_embedding = ConstantPositionalEmbedding.get_embedding(cur_seq_len,
+                                                                                 self.embedding_dim,
+                                                                                 positions.device)
+
+        return self._position_embedding.index_select(0, positions.view(-1)).view(batch_size, seq_len, -1)
+
+
 class MultiheadAttention(nn.Module):
     @classmethod
     def _get_future_mask(cls, size, device):
@@ -196,11 +236,17 @@ class TransformerBlock(nn.Module):
 class TransformerModule(nn.Module):
     def __init__(self, n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
                  padding_idx, n_heads, dropout, embed_dropout, attn_dropout, ff_dropout,
-                 normalize_embeddings, n_segments=None):
+                 normalize_embeddings, n_segments=None, constant_embedding=False):
         super(TransformerModule, self).__init__()
 
+        self._constant_embedding = constant_embedding
+
         self.embeddings = nn.Embedding(n_embeddings, embeddings_size, padding_idx=padding_idx)
-        self.pos_embeddings = nn.Embedding(n_pos_embeddings + 1, embeddings_size, padding_idx=0)
+        if self._constant_embedding:
+            self.pos_embeddings = ConstantPositionalEmbedding(embeddings_size, padding_idx=0)
+        else:
+            self.pos_embeddings = nn.Embedding(n_pos_embeddings + 1, embeddings_size, padding_idx=0)
+
         self.embed_dropout = nn.Dropout(embed_dropout)
         self.layers = nn.ModuleList([TransformerBlock(embeddings_size, n_heads, dropout, attn_dropout, ff_dropout) for _ in range(n_layers)])
         self.n_segments = n_segments
@@ -210,7 +256,8 @@ class TransformerModule(nn.Module):
 
     def _init_weights(self):
         nn.init.normal_(self.embeddings.weight, std=0.02)
-        nn.init.normal_(self.pos_embeddings.weight, std=0.02)
+        if isinstance(self.pos_embeddings, nn.Embedding):
+            nn.init.normal_(self.pos_embeddings.weight, std=0.02)
 
     def forward(self, x, enc_contexts=[], past=None):
         # x.dim() == 3 if we have additional dialog embeddings else x.dim() == 2
@@ -230,7 +277,8 @@ class TransformerModule(nn.Module):
             x = x.sum(dim=-2)
         if self.normalize_embeddings:
             x = x * math.sqrt(self.embeddings.embedding_dim)  # Used in pretrained last checkpoint for ConvAI2
-        x = x + self.pos_embeddings(positions)
+
+        x += self.pos_embeddings(positions)
         x = self.embed_dropout(x)
 
         enc_contexts = sum(enc_contexts, ())

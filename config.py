@@ -31,6 +31,7 @@ def get_model_config():
                        'annealing': env_config('ANNEALING', default=0, cast=float),
                        'length_penalty': 0.6,
                        'n_segments': None,
+                       'constant_embedding': False,
                        'multiple_choice_head': env_config('MULTIPLE_CHOICE_HEAD', default=False, cast=bool)})
     if config.annealing_topk is not None:
         config.annealing_topk = int(config.annealing_topk)

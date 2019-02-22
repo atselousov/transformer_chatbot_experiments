@@ -92,6 +92,7 @@ def main():
                                    diversity_coef=model_config.diversity_coef,
                                    diversity_groups=model_config.diversity_groups,
                                    multiple_choice_head=model_config.multiple_choice_head,
+                                   constant_embedding=model_config.constant_embedding,
                                    single_input=trainer_config.single_input,
                                    dialog_embeddings=trainer_config.dialog_embeddings,
                                    vocab=None)  # for beam search debugging
