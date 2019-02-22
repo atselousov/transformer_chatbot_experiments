@@ -222,7 +222,7 @@ class Trainer:
             if risk_func is not None and self.risk_weight > 0:
                 self.model.eval()  # desactivate dropout
                 if self.single_input:
-                    beams, beam_lens = []
+                    beams, beam_lens = [], []
                     for b in range(targets.shape[0]):
                         beam_outputs = self.model.beam_search(beam_starts=contexts[b], return_beams=True)
                         beams.append(beam_outputs[0])
