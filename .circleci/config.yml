@@ -36,4 +36,4 @@ workflows:
             branches:
               only:
               - master
-              - platform
+              - experiments

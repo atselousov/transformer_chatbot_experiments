@@ -19,3 +19,4 @@ aiohttp
 telepot
 apscheduler
 mongoengine
+python-decouple==3.1
