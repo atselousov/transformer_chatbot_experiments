@@ -122,7 +122,7 @@ def main():
                                    augment=False,
                                    aug_syn_proba=0.0,
                                    limit_size=trainer_config.limit_eval_size)
-
+    logger.info(f'train dataset {len(train_dataset)} test dataset {(test_dataset)}')
     model_trainer = Trainer(transformer,
                             train_dataset,
                             writer,

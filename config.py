@@ -33,6 +33,8 @@ def get_model_config():
                        'n_segments': None,
                        'constant_embedding': False,
                        'multiple_choice_head': env_config('MULTIPLE_CHOICE_HEAD', default=False, cast=bool)})
+    if config.annealing_topk == 'None':
+        config.annealing_topk = None
     if config.annealing_topk is not None:
         config.annealing_topk = int(config.annealing_topk)
     return config
@@ -67,7 +69,7 @@ def get_trainer_config():
                        'linear_schedule': env_config('LINEAR_SCHEDULE', default=True, cast=bool),
                        'evaluate_full_sequences': env_config('EVALUATE_FULL_SEQUENCES', default=True, cast=bool),
                        'limit_eval_size': env_config('LIMIT_EVAL_TIME', default=-1, cast=int),
-                       'limit_train_size': -1,
+                       'limit_train_size': env_config('LIMIT_TRAIN_TIME', default=-1, cast=int),
                        'load_last': '', #./checkpoints/last_checkpoint',  # Now that we save several experiments you can put the path of the checpoint file you want to load here
                        'repo_id': str(repo),
                        'repo_sha': str(repo.head.object.hexsha),
