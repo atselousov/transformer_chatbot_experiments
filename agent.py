@@ -89,6 +89,7 @@ class TransformerAgent(Agent):
                                           ff_dropout=model_config.ff_dropout,
                                           bos_id=self.vocab.bos_id,
                                           eos_id=self.vocab.eos_id,
+                                          sent_dialog_id=self.vocab.sent_dialog_id,
                                           max_seq_len=self.opt['max_seq_len'],
                                           beam_size=self.opt['beam_size'],
                                           length_penalty=self.opt['length_penalty'],
@@ -97,7 +98,12 @@ class TransformerAgent(Agent):
                                           annealing_topk=self.opt['annealing_topk'],
                                           annealing=self.opt['annealing'],
                                           diversity_coef=self.opt['diversity_coef'],
-                                          diversity_groups=self.opt['diversity_groups'])
+                                          diversity_groups=self.opt['diversity_groups'],
+                                          normalize_embeddings=model_config.normalize_embeddings,
+                                          multiple_choice_head=model_config.multiple_choice_head,
+                                          constant_embedding=model_config.constant_embedding,
+                                          vocab=self.vocab
+                                          )
 
             state_dict = torch.load(model_config.checkpoint_path, map_location=lambda storage, loc: storage)
             if 'model' in state_dict:
