@@ -31,7 +31,7 @@ except ImportError:
 
 
 class ConstantPositionalEmbedding(nn.Module):
-    def __init__(self,  embedding_dim):
+    def __init__(self, embedding_dim):
         super(ConstantPositionalEmbedding, self).__init__()
 
         self._embedding_dim = embedding_dim
@@ -55,14 +55,14 @@ class ConstantPositionalEmbedding(nn.Module):
 
     def forward(self, positions):
         batch_size, seq_len = positions.size()
-        seq_len = max(seq_len, torch.max(positions).item())
 
-        if self._position_embedding is None or seq_len >= self._position_embedding.size(0):
-            self._position_embedding = ConstantPositionalEmbedding.get_embedding(seq_len, self._embedding_dim)
+        cur_seq_len = max(seq_len, torch.max(positions).item())
+
+        if self._position_embedding is None or cur_seq_len >= self._position_embedding.size(0):
+            self._position_embedding = ConstantPositionalEmbedding.get_embedding(cur_seq_len, self._embedding_dim)
 
         return self._position_embedding.index_select(0, positions.view(-1)).view(batch_size,
                                                                                  seq_len, -1).to(positions.device)
-
 
 class MultiheadAttention(nn.Module):
     @classmethod
