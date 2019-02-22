@@ -55,7 +55,7 @@ class ConstantPositionalEmbedding(nn.Module):
 
     def forward(self, positions):
         batch_size, seq_len = positions.size()
-        seq_len = max(seq_len, torch.max(positions))
+        seq_len = max(seq_len, torch.max(positions).item())
 
         if self._position_embedding is None or seq_len >= self._position_embedding.size(0):
             self._position_embedding = ConstantPositionalEmbedding.get_embedding(seq_len, self._embedding_dim)
