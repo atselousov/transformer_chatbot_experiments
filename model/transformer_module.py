@@ -31,13 +31,14 @@ except ImportError:
 
 
 class ConstantPositionalEmbedding(nn.Module):
-    def __init__(self, embedding_dim):
+    def __init__(self, embedding_dim, padding_idx):
         super(ConstantPositionalEmbedding, self).__init__()
 
-        self._embedding_dim = embedding_dim
+        self.embedding_dim = embedding_dim
+        self.padding_idx = padding_idx
         self.register_buffer('_position_embedding',
                              ConstantPositionalEmbedding.get_embedding(1024,
-                                                                       self._embedding_dim))
+                                                                       self.embedding_dim))
 
     @classmethod
     def get_embedding(cls, seq_len, embedding_dim, device=None):
@@ -62,7 +63,7 @@ class ConstantPositionalEmbedding(nn.Module):
 
         if cur_seq_len >= self._position_embedding.size(0):
             self._position_embedding = ConstantPositionalEmbedding.get_embedding(cur_seq_len,
-                                                                                 self._embedding_dim,
+                                                                                 self.embedding_dim,
                                                                                  positions.device)
 
         return self._position_embedding.index_select(0, positions.view(-1)).view(batch_size, seq_len, -1)
@@ -242,7 +243,7 @@ class TransformerModule(nn.Module):
 
         self.embeddings = nn.Embedding(n_embeddings, embeddings_size, padding_idx=padding_idx)
         if self._constant_embedding:
-            self.pos_embeddings = ConstantPositionalEmbedding(embeddings_size)
+            self.pos_embeddings = ConstantPositionalEmbedding(embeddings_size, padding_idx=0)
         else:
             self.pos_embeddings = nn.Embedding(n_pos_embeddings + 1, embeddings_size, padding_idx=0)
 
