@@ -29,6 +29,41 @@ except ImportError:
     print("Better speed can be achieved with apex installed from https://www.github.com/nvidia/apex.")
     from torch.nn import LayerNorm
 
+
+class ConstantPositionalEmbedding(nn.Module):
+    def __init__(self,  embedding_dim):
+        super(ConstantPositionalEmbedding, self).__init__()
+
+        self._embedding_dim = embedding_dim
+        self.register_buffer('_position_embedding', None)
+
+    @classmethod
+    def get_embedding(cls, seq_len, embedding_dim):
+        seq_len += 1
+
+        half_dim = embedding_dim // 2
+
+        emb = math.log(10000) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, dtype=torch.float32) * -emb)
+        emb = torch.arange(seq_len, dtype=torch.float32).unsqueeze(1) * emb.unsqueeze(0)
+        emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1).view(seq_len, -1)
+
+        if embedding_dim % 2:
+            emb = torch.cat([emb, torch.zeros(seq_len, 1)], dim=1)
+
+        return emb
+
+    def forward(self, positions):
+        batch_size, seq_len = positions.size()
+        seq_len = max(seq_len, torch.max(positions))
+
+        if self._position_embedding is None or seq_len >= self._position_embedding.size(0):
+            self._position_embedding = ConstantPositionalEmbedding.get_embedding(seq_len, self._embedding_dim)
+
+        return self._position_embedding.index_select(0, positions.view(-1)).view(batch_size,
+                                                                                 seq_len, -1).to(positions.device)
+
+
 class MultiheadAttention(nn.Module):
     @classmethod
     def _get_future_mask(cls, size, device):
@@ -201,6 +236,7 @@ class TransformerModule(nn.Module):
 
         self.embeddings = nn.Embedding(n_embeddings, embeddings_size, padding_idx=padding_idx)
         self.pos_embeddings = nn.Embedding(n_pos_embeddings + 1, embeddings_size, padding_idx=0)
+        self.const_pos_embeddings = ConstantPositionalEmbedding(embeddings_size)
         self.embed_dropout = nn.Dropout(embed_dropout)
         self.layers = nn.ModuleList([TransformerBlock(embeddings_size, n_heads, dropout, attn_dropout, ff_dropout) for _ in range(n_layers)])
         self.n_segments = n_segments
@@ -231,6 +267,7 @@ class TransformerModule(nn.Module):
         if self.normalize_embeddings:
             x = x * math.sqrt(self.embeddings.embedding_dim)  # Used in pretrained last checkpoint for ConvAI2
         x = x + self.pos_embeddings(positions)
+        x += self.const_pos_embeddings(positions)
         x = self.embed_dropout(x)
 
         enc_contexts = sum(enc_contexts, ())
