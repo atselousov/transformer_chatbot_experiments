@@ -249,11 +249,10 @@ class TransformerBlock(nn.Module):
                 x = a + x if i == 0 else self.gated_res(a, x)
 
         if self.gated_res is None or n_attn == 1:
-            full_attn = self.dropout(full_attn)
-            x = self.attn_norm(x + full_attn)
+            x += self.dropout(full_attn)
         else:
             x = self.dropout(x)
-            x = self.attn_norm(x)
+        x = self.attn_norm(x)
 
         f = self.ff(x)
         f = self.dropout(f)
