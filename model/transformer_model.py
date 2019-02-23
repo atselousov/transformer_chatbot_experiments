@@ -56,7 +56,8 @@ class TransformerModel(nn.Module):
                  bos_id, eos_id, sent_dialog_id, max_seq_len=256, beam_size=5, sample=False,
                  length_penalty=0.8, annealing_topk=None, annealing=0, normalize_embeddings=True,
                  diversity_coef=0, diversity_groups=1, n_segments=None, multiple_choice_head=False,
-                 single_input=False, dialog_embeddings=False, vocab=None, constant_embedding=False):
+                 single_input=False, dialog_embeddings=False, vocab=None, constant_embedding=False,
+                 share_models=True, successive_attention=False):
 
         super(TransformerModel, self).__init__()
 
@@ -80,13 +81,21 @@ class TransformerModel(nn.Module):
 
         self.single_input = single_input
         self.dialog_embeddings = dialog_embeddings
+        self.share_models = share_models
 
         self.vocab = vocab
 
         self.transformer_module = TransformerModule(n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
                                                     padding_idx, n_heads, dropout, embed_dropout, attn_dropout,
                                                     ff_dropout, normalize_embeddings, n_segments,
-                                                    constant_embedding=constant_embedding)
+                                                    constant_embedding=constant_embedding,
+                                                    successive_attention=successive_attention)
+        if not share_models:
+            self.encoder_module = TransformerModule(n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
+                                                    padding_idx, n_heads, dropout, embed_dropout, attn_dropout,
+                                                    ff_dropout, normalize_embeddings, n_segments,
+                                                    constant_embedding=constant_embedding,
+                                                    successive_attention=successive_attention)
         self.pre_softmax = nn.Linear(embeddings_size, n_embeddings, bias=False)
         self.pre_softmax.weight = self.transformer_module.embeddings.weight
         self.multiple_choice_head = MultipleChoiceHead(self.embeddings_size, dropout) if multiple_choice_head else None
@@ -97,7 +106,7 @@ class TransformerModel(nn.Module):
 
     def encode(self, x):
         " Returns a tuple(x, padding_mask)"
-        x, padding_mask, _ = self.transformer_module(x)
+        x, padding_mask, _ = self.transformer_module(x) if self.share_models else self.encoder_module(x)
         return x, padding_mask
 
     def generate(self, enc_x):

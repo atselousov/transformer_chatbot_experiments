@@ -95,13 +95,20 @@ def main():
                                    constant_embedding=model_config.constant_embedding,
                                    single_input=trainer_config.single_input,
                                    dialog_embeddings=trainer_config.dialog_embeddings,
+                                   share_models=model_config.share_models,
+                                   successive_attention=model_config.successive_attention,
                                    vocab=None)  # for beam search debugging
 
     if not trainer_config.load_last:
         load_openai_weights(transformer.transformer_module, 
                             trainer_config.openai_parameters_dir,
                             n_special_tokens=vocab.n_special_tokens)
-        logger.info('OpenAI weights loaded from {}'.format(trainer_config.openai_parameters_dir))
+        if not model_config.share_models:
+            load_openai_weights(transformer.encoder_module, 
+                                trainer_config.openai_parameters_dir,
+                                n_special_tokens=vocab.n_special_tokens)
+        logger.info('OpenAI weights loaded from {}, model shared: {}'.format(
+                        trainer_config.openai_parameters_dir, model_config.share_models))
 
     logger.info('loading datasets')
     train_dataset = FacebookDataset(trainer_config.train_datasets, vocab,

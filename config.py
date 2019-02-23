@@ -32,7 +32,9 @@ def get_model_config():
                        'length_penalty': 0.6,
                        'n_segments': None,
                        'constant_embedding': False,
-                       'multiple_choice_head': env_config('MULTIPLE_CHOICE_HEAD', default=False, cast=bool)})
+                       'multiple_choice_head': env_config('MULTIPLE_CHOICE_HEAD', default=False, cast=bool),
+                       'share_models': env_config('SHARE_MODELS', default=True, cast=bool),
+                       'successive_attention': env_config('SUCCESSIVE_ATTENTION', default=False, cast=bool)})
     if config.annealing_topk == 'None':
         config.annealing_topk = None
     if config.annealing_topk is not None:
@@ -95,10 +97,9 @@ def get_trainer_config():
     local_config.negative_samples = 2
     local_config.n_jobs = 0
     local_config.device = 'cpu'
-    local_config.load_last = './checkpoints/last_checkpoint'
+    # local_config.load_last = './checkpoints/last_checkpoint'
     local_config.fp16 = False
-    local_config.single_input = False
-    local_config.dialog_embeddings = False
-    local_config.use_start_end = True
+    local_config.train_datasets_cache = './datasets/train_datasets_cache.bin'
+    local_config.test_datasets_cache = './datasets/test_datasets_cache.bin'
 
     return config if torch.cuda.is_available() else local_config

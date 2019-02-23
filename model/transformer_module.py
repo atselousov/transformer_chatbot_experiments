@@ -196,14 +196,36 @@ class FeedForward(nn.Module):
         return x
 
 
+class GatedResidual(nn.Module):
+    """ A gated residual layer: see https://arxiv.org/abs/1810.03581
+    """
+    def __init__(self, in_features):
+        super(GatedResidual, self).__init__()
+        self.wi = nn.Parameter(torch.Tensor(in_features))
+        self.wo = nn.Parameter(torch.Tensor(in_features))
+        self.act = nn.Sigmoid()
+        self._init_weights()
+
+    def _init_weights(self):
+        nn.init.normal_(self.wi, std=0.02)
+        nn.init.normal_(self.wo, std=0.02)
+
+    def forward(self, module_input, module_output):
+        gate = self.act(module_input.view(-1, module_output.size(-1)) @ self.wi
+                      + module_input.view(-1, module_output.size(-1)) @ self.wo)
+        gate = gate.view(*module_input.shape[:2], 1)
+        return gate * module_input + (1 - gate) * module_output  # gate intialized to be small => initialy mostly skip
+
+
 class TransformerBlock(nn.Module):
-    def __init__(self, n_features, n_heads, dropout, attn_dropout, ff_dropout):
+    def __init__(self, n_features, n_heads, dropout, attn_dropout, ff_dropout, successive_attention=False):
         super(TransformerBlock, self).__init__()
 
         self.attn = MultiheadAttention(n_features, n_heads, attn_dropout)
         self.attn_norm = LayerNorm(n_features)
         self.ff = FeedForward(n_features, 4 * n_features, ff_dropout)
         self.ff_norm = LayerNorm(n_features)
+        self.gated_res = GatedResidual(n_features) if successive_attention else None
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, padding_mask, *contexts, layer_past=None):
@@ -221,10 +243,17 @@ class TransformerBlock(nn.Module):
             c, m = inputs[i], inputs[i+1].byte()
             a, key_value, query = self.attn(x, c, c, m, attn_past_kv=attn_past_kv, attn_past_q=query)
             save_kv.append(key_value)
-            full_attn += (a / n_attn)
+            if self.gated_res is None or n_attn == 1:  # parallel attention
+                full_attn += (a / n_attn)
+            else:  # successive attention w. normal residual on causal attention, gated residual on context
+                x = a + x if i == 0 else self.gated_res(a, x)
 
-        full_attn = self.dropout(full_attn)
-        x = self.attn_norm(x + full_attn)
+        if self.gated_res is None or n_attn == 1:
+            full_attn = self.dropout(full_attn)
+            x = self.attn_norm(x + full_attn)
+        else:
+            x = self.dropout(x)
+            x = self.attn_norm(x)
 
         f = self.ff(x)
         f = self.dropout(f)
@@ -236,7 +265,8 @@ class TransformerBlock(nn.Module):
 class TransformerModule(nn.Module):
     def __init__(self, n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
                  padding_idx, n_heads, dropout, embed_dropout, attn_dropout, ff_dropout,
-                 normalize_embeddings, n_segments=None, constant_embedding=False):
+                 normalize_embeddings, n_segments=None, constant_embedding=False,
+                 successive_attention=False):
         super(TransformerModule, self).__init__()
 
         self._constant_embedding = constant_embedding
@@ -248,7 +278,8 @@ class TransformerModule(nn.Module):
             self.pos_embeddings = nn.Embedding(n_pos_embeddings + 1, embeddings_size, padding_idx=0)
 
         self.embed_dropout = nn.Dropout(embed_dropout)
-        self.layers = nn.ModuleList([TransformerBlock(embeddings_size, n_heads, dropout, attn_dropout, ff_dropout) for _ in range(n_layers)])
+        self.layers = nn.ModuleList([TransformerBlock(embeddings_size, n_heads, dropout, attn_dropout, ff_dropout, successive_attention)
+                                     for _ in range(n_layers)])
         self.n_segments = n_segments
         self.normalize_embeddings = normalize_embeddings
 
