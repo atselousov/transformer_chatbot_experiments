@@ -211,10 +211,10 @@ class GatedResidual(nn.Module):
         nn.init.normal_(self.wo, std=0.02)
 
     def forward(self, module_input, module_output):
-        gate = self.act(module_input.view(-1, module_output.size(-1)) @ self.wi
-                      + module_input.view(-1, module_output.size(-1)) @ self.wo)
+        gate = self.act(module_input.view(-1, module_input.size(-1)) @ self.wi
+                      + module_output.view(-1, module_output.size(-1)) @ self.wo)
         gate = gate.view(*module_input.shape[:2], 1)
-        return gate * module_input + (1 - gate) * module_output  # gate intialized to be small => initialy mostly skip
+        return gate * module_output + (1 - gate) * module_input  # gate intialized to be small => initialy mostly skip
 
 
 class TransformerBlock(nn.Module):
