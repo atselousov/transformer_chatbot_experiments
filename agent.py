@@ -60,6 +60,8 @@ class TransformerAgent(Agent):
 
         self.clean_emoji = self.opt['clean_emoji']
         self.check_grammar = self.opt['check_grammar']
+        self.dialog_embeddings = model_config.dialog_embeddings
+
         # 'max_seq_len': 128,
         # 'beam_size': 1,
         # 'diversity_coef': 0,
@@ -163,16 +165,24 @@ class TransformerAgent(Agent):
             info, dialog = self._parse(text)
 
             info = sum([self.vocab.string2ids(i) for i in info], [])
-            self.history['info'].extend(info)
+            if info:
+                info = (self.history['info'][1:-1] + info)[:self.model.n_pos_embeddings-3]
+                info = [self.vocab.info_bos_id] + info + [self.vocab.info_eos_id]
+                if self.dialog_embeddings:
+                    info = [[t, self.vocab.info_dialog_id] for t in info]
 
-            for i, d in enumerate(dialog, 1):
-                d = self.vocab.string2ids(d)
+                self.history['info'] = info
+
+            for i, replica in enumerate(dialog, 1):
+                replica = self.vocab.string2ids(replica)
                 if i % 2 == 1:
-                    d = [self.vocab.talker1_bos_id] + d + [self.vocab.talker1_eos_id]
+                    replica = [self.vocab.talker1_bos_id] + replica + [self.vocab.talker1_eos_id]
                 else:
-                    d = [self.vocab.talker2_bos_id] + d + [self.vocab.talker2_eos_id]
-
-                self.history['dialog'].extend(d)
+                    replica = [self.vocab.talker2_bos_id] + replica + [self.vocab.talker2_eos_id]
+                if self.dialog_embeddings:
+                    replica = [[t, self.vocab.talker1_dialog_id if i % 2 == 1 else self.vocab.talker2_dialog_id]
+                               for t in replica]
+                self.history['dialog'].extend(replica)
 
         observation['agent'] = self        
 
@@ -202,8 +212,7 @@ class TransformerAgent(Agent):
         try:
             valid_observations = [observations[i] for i in valid_ids]
 
-            infos = [obs['agent'].history['info'][:self.model.n_pos_embeddings-3] for obs in valid_observations]
-            infos = [([self.vocab.info_bos_id] + ifo + [self.vocab.info_eos_id] if len(ifo) else ifo) for ifo in infos]
+            infos = [obs['agent'].history['info'] for obs in valid_observations]
             dialogs = [list(obs['agent'].history['dialog'])[-self.model.n_pos_embeddings+1:] for obs in valid_observations]
             contexts = []
 
@@ -225,9 +234,11 @@ class TransformerAgent(Agent):
             pred_texts = self.model.beam_search(enc_contexts)
 
             for i in range(batch_size):
-                valid_observations[i]['agent'].history['dialog'].extend([self.vocab.talker2_bos_id] +
-                                                                        pred_texts[i] +
-                                                                        [self.vocab.talker2_eos_id])
+                pred_toks = [self.vocab.talker2_bos_id] + pred_texts[i] + [self.vocab.talker2_eos_id]
+                if self.dialog_embeddings:
+                    pred_toks = [[t, self.vocab.talker2_dialog_id] for t in pred_toks]
+
+                valid_observations[i]['agent'].history['dialog'].extend(pred_toks)
                 batch_reply[valid_ids[i]]['text'] = self.vocab.ids2string(pred_texts[i])
                 batch_reply[valid_ids[i]]['episode_done'] = valid_observations[i]['agent'].episode_done
 
