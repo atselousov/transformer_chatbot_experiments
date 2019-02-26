@@ -98,6 +98,7 @@ def main():
                                    share_models=model_config.share_models,
                                    successive_attention=model_config.successive_attention,
                                    sparse_embeddings=model_config.sparse_embeddings,
+                                   shared_attention=model_config.shared_attention,
                                    vocab=None)  # for beam search debugging
 
     if not trainer_config.load_last:

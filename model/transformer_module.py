@@ -218,10 +218,12 @@ class GatedResidual(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, n_features, n_heads, dropout, attn_dropout, ff_dropout, successive_attention=False):
+    def __init__(self, n_features, n_heads, dropout, attn_dropout, ff_dropout,
+                 successive_attention=False, shared_attention=True):
         super(TransformerBlock, self).__init__()
 
         self.attn = MultiheadAttention(n_features, n_heads, attn_dropout)
+        self.context_attn = MultiheadAttention(n_features, n_heads, attn_dropout) if not shared_attention else None
         self.attn_norm = LayerNorm(n_features)
         self.ff = FeedForward(n_features, 4 * n_features, ff_dropout)
         self.ff_norm = LayerNorm(n_features)
@@ -241,7 +243,8 @@ class TransformerBlock(nn.Module):
             layer_past = [None] * n_attn
         for i, attn_past_kv in zip(range(0, len(inputs), 2), layer_past):
             c, m = inputs[i], inputs[i+1].byte()
-            a, key_value, query = self.attn(x, c, c, m, attn_past_kv=attn_past_kv, attn_past_q=query)
+            attn = self.attn if self.context_attn is None or i == 0 else self.context_attn
+            a, key_value, query = attn(x, c, c, m, attn_past_kv=attn_past_kv, attn_past_q=query)
             save_kv.append(key_value)
             if self.gated_res is None or n_attn == 1:  # parallel attention
                 full_attn += (a / n_attn)
@@ -265,7 +268,8 @@ class TransformerModule(nn.Module):
     def __init__(self, n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
                  padding_idx, n_heads, dropout, embed_dropout, attn_dropout, ff_dropout,
                  normalize_embeddings, n_segments=None, constant_embedding=False,
-                 successive_attention=False, sparse_embeddings=False):
+                 successive_attention=False, sparse_embeddings=False,
+                 shared_attention=True):
         super(TransformerModule, self).__init__()
 
         self._constant_embedding = constant_embedding
@@ -277,7 +281,8 @@ class TransformerModule(nn.Module):
             self.pos_embeddings = nn.Embedding(n_pos_embeddings + 1, embeddings_size, padding_idx=0, sparse=sparse_embeddings)
 
         self.embed_dropout = nn.Dropout(embed_dropout)
-        self.layers = nn.ModuleList([TransformerBlock(embeddings_size, n_heads, dropout, attn_dropout, ff_dropout, successive_attention)
+        self.layers = nn.ModuleList([TransformerBlock(embeddings_size, n_heads, dropout, attn_dropout, ff_dropout,
+                                                      successive_attention, shared_attention)
                                      for _ in range(n_layers)])
         self.n_segments = n_segments
         self.normalize_embeddings = normalize_embeddings
