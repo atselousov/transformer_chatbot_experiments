@@ -62,8 +62,7 @@ class Adam(torch.optim.Optimizer):
                 if p.grad is None:
                     continue
                 grad = p.grad.data
-                if grad.is_sparse:
-                    raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
+                
                 amsgrad = group['amsgrad']
 
                 state = self.state[p]
@@ -85,34 +84,70 @@ class Adam(torch.optim.Optimizer):
                 beta1, beta2 = group['betas']
 
                 state['step'] += 1
+                
+                if grad.is_sparse:
+                    grad = grad.coalesce()  # the update is non-linear so indices must be unique
+                    grad_indices = grad._indices()
+                    grad_values = grad._values()
+                    size = grad.size()
 
-                # Decay the first and second moment running average coefficient
-                exp_avg.mul_(beta1).add_(1 - beta1, grad)
-                exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
-                if amsgrad:
-                    # Maintains the maximum of all 2nd moment running avg. till now
-                    torch.max(max_exp_avg_sq, exp_avg_sq, out=max_exp_avg_sq)
-                    # Use the max. for normalizing running avg. of gradient
-                    denom = max_exp_avg_sq.sqrt().add_(group['eps'])
+                    def make_sparse(values):
+                        constructor = grad.new
+                        if grad_indices.dim() == 0 or values.dim() == 0:
+                            return constructor().resize_as_(grad)
+                        return constructor(grad_indices, values, size)
+
+                    exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
+                    beta1, beta2 = group['betas']
+
+                    # Decay the first and second moment running average coefficient
+                    #      old <- b * old + (1 - b) * new
+                    # <==> old += (1 - b) * (new - old)
+                    old_exp_avg_values = exp_avg.sparse_mask(grad)._values()
+                    exp_avg_update_values = grad_values.sub(old_exp_avg_values).mul_(1 - beta1)
+                    exp_avg.add_(make_sparse(exp_avg_update_values))
+                    old_exp_avg_sq_values = exp_avg_sq.sparse_mask(grad)._values()
+                    exp_avg_sq_update_values = grad_values.pow(2).sub_(old_exp_avg_sq_values).mul_(1 - beta2)
+                    exp_avg_sq.add_(make_sparse(exp_avg_sq_update_values))
+
+                    # Dense addition again is intended, avoiding another sparse_mask
+                    numer = exp_avg_update_values.add_(old_exp_avg_values)
+                    exp_avg_sq_update_values.add_(old_exp_avg_sq_values)
+                    denom = exp_avg_sq_update_values.sqrt_().add_(group['eps'])
+                    del exp_avg_update_values, exp_avg_sq_update_values
+
+                    bias_correction1 = 1 - beta1 ** state['step']
+                    bias_correction2 = 1 - beta2 ** state['step']
+                    step_size = group['lr'] * math.sqrt(bias_correction2) / bias_correction1
+
+                    p.data.add_(make_sparse(-step_size * numer.div_(denom)))
                 else:
-                    denom = exp_avg_sq.sqrt().add_(group['eps'])
+                    # Decay the first and second moment running average coefficient
+                    exp_avg.mul_(beta1).add_(1 - beta1, grad)
+                    exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
+                    if amsgrad:
+                        # Maintains the maximum of all 2nd moment running avg. till now
+                        torch.max(max_exp_avg_sq, exp_avg_sq, out=max_exp_avg_sq)
+                        # Use the max. for normalizing running avg. of gradient
+                        denom = max_exp_avg_sq.sqrt().add_(group['eps'])
+                    else:
+                        denom = exp_avg_sq.sqrt().add_(group['eps'])
 
-                bias_correction1 = 1 - beta1 ** state['step']
-                bias_correction2 = 1 - beta2 ** state['step']
-                step_size = group['lr'] * math.sqrt(bias_correction2) / bias_correction1
+                    bias_correction1 = 1 - beta1 ** state['step']
+                    bias_correction2 = 1 - beta2 ** state['step']
+                    step_size = group['lr'] * math.sqrt(bias_correction2) / bias_correction1
 
-                if group['weight_decay'] != 0:
-                    p.data.add_(-group['weight_decay'] * group['lr'], p.data)
+                    if group['weight_decay'] != 0:
+                        p.data.add_(-group['weight_decay'] * group['lr'], p.data)
 
-                p.data.addcdiv_(-step_size, exp_avg, denom)
+                    p.data.addcdiv_(-step_size, exp_avg, denom)
 
         return loss
 
 
 class NoamOpt:
-    def __init__(self, embeddings_size, factor, warmup, optimizer, linear_schedule=False, lr=None, total_steps=None, fp16=False):
+    def __init__(self, embeddings_size, warmup, optimizer, linear_schedule=False, lr=None, total_steps=None, fp16=False):
         self.embeddings_size = embeddings_size
-        self.factor = factor
         self.warmup = warmup
         self.optimizer = optimizer
         self.linear_schedule = linear_schedule
@@ -162,7 +197,7 @@ class NoamOpt:
         if step is None:
             step = self._step
             
-        return self.factor * (self.embeddings_size ** (-0.5) * min(step ** (-0.5), step * self.warmup ** (-1.5)))
+        return self.lr * (self.embeddings_size ** (-0.5) * min(step ** (-0.5), step * self.warmup ** (-1.5)))
 
     @staticmethod
     def warmup_linear(x, warmup=0.002):

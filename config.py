@@ -22,8 +22,8 @@ def get_model_config():
                        'embed_dropout': default_config.embed_dropout,
                        'attn_dropout': default_config.attn_dropout,
                        'ff_dropout': default_config.ff_dropout,
-                       'normalize_embeddings': True,  # Used in pretrained last checkpoint for ConvAI2
-                       'max_seq_len': 256,
+                       'normalize_embeddings': False,  # Used in pretrained last checkpoint for ConvAI2
+                       'max_seq_len': 128,
                        'beam_size': env_config('BEAM_SIZE', default=3, cast=int),
                        'diversity_coef': env_config('DIVERSITY_COEF', default=0, cast=int),
                        'diversity_groups': env_config('DIVERSITY_GROUP', default=1, cast=int),
@@ -34,7 +34,8 @@ def get_model_config():
                        'constant_embedding': False,
                        'multiple_choice_head': env_config('MULTIPLE_CHOICE_HEAD', default=False, cast=bool),
                        'share_models': env_config('SHARE_MODELS', default=True, cast=bool),
-                       'successive_attention': env_config('SUCCESSIVE_ATTENTION', default=False, cast=bool)})
+                       'successive_attention': env_config('SUCCESSIVE_ATTENTION', default=False, cast=bool),
+                       'sparse_embeddings': env_config('SPARSE_EMBEDDINGS', default=True, cast=bool)})
     if config.annealing_topk == 'None':
         config.annealing_topk = None
     if config.annealing_topk is not None:
@@ -43,21 +44,21 @@ def get_model_config():
 
 
 def get_trainer_config():
-    config = AttrDict({'n_epochs': env_config('N_EPOCHS', default=3, cast=int),
-                       'train_batch_size': env_config('TRAIN_BATCH_SIZE', default=256, cast=int),
-                       'batch_split': env_config('BATCH_SPLIT', default=64, cast=int),
+    config = AttrDict({'n_epochs': env_config('N_EPOCHS', default=5, cast=int),
+                       'train_batch_size': env_config('TRAIN_BATCH_SIZE', default=128, cast=int),
+                       'batch_split': env_config('BATCH_SPLIT', default=32, cast=int),
                        'test_batch_size': env_config('TEST_BATCH_SIZE', default=8, cast=int),
                        'lr': 6.25e-5,
                        'lr_warmup': 0.002,  # a fraction of total training (epoch * train_set_length) if linear_schedule == True
                        'weight_decay': 0.01,
                        's2s_weight': env_config('S2S_WEIGHT', default=1, cast=float),
-                       'lm_weight': env_config('LM_WEIGHT', default=0.5, cast=float),
+                       'lm_weight': env_config('LM_WEIGHT', default=0, cast=float),
                        'risk_weight': env_config('RISK_WEIGHT', default=0, cast=float),
                        'hits_weight': env_config('HITS_WEIGHT', default=0, cast=float),
                        'negative_samples': env_config('NEGATIVE_SAMPLES', default=0, cast=int),
                        'single_input': env_config('SINGLE_INPUT', default=False, cast=bool),
-                       'dialog_embeddings': env_config('DIALOG_EMBEDDINGS', default=False, cast=bool),
-                       'use_start_end': env_config('USE_START_END', default=True, cast=bool),
+                       'dialog_embeddings': env_config('DIALOG_EMBEDDINGS', default=True, cast=bool),
+                       'use_start_end': env_config('USE_START_END', default=False, cast=bool),
                        'n_jobs': 4,
                        'label_smoothing': env_config('LABEL_SMOOTHING', default=0.1, cast=float),
                        'clip_grad': None,
@@ -66,7 +67,7 @@ def get_trainer_config():
                        'device': 'cuda',
                        'persona_augment': env_config('PERSONA_AUGMENT', default=False, cast=bool),
                        'persona_aug_syn_proba': env_config('PERSONA_AUG_SYN_PROBA', default=0.0, cast=float),
-                       'fp16': env_config('FP16', default=True, cast=bool),
+                       'fp16': env_config('FP16', default=False, cast=bool),
                        'loss_scale': env_config('LOSS_SCALE', default=0, cast=float),
                        'linear_schedule': env_config('LINEAR_SCHEDULE', default=True, cast=bool),
                        'evaluate_full_sequences': env_config('EVALUATE_FULL_SEQUENCES', default=True, cast=bool),
@@ -81,9 +82,9 @@ def get_trainer_config():
                        'eval_references_file': 'eval_references_file',
                        'eval_predictions_file': 'eval_predictions_file',
                        'interrupt_checkpoint_path': 'interrupt_checkpoint',  # there are now in the ./runs/XXX/ experiments folders
-                       'train_datasets': ['./datasets/ConvAI2/train_self_original_no_cands.txt',
-                                          './datasets/ConvAI2/train_self_revised_no_cands.txt',
-                                          './datasets/DailyDialog/train_dailydialog.txt'],
+                       'train_datasets': ['./datasets/ConvAI2/train_self_original.txt',],
+                                          #'./datasets/ConvAI2/train_self_revised.txt',
+                                          #'./datasets/DailyDialog/train_dailydialog.txt'],
                        'train_datasets_cache': 'train_cache.bin',
                        'test_datasets': ['./datasets/ConvAI2/valid_self_original.txt',],
                                          # './datasets/ConvAI2/valid_self_revised_no_cands.txt',

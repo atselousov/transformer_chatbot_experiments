@@ -249,7 +249,7 @@ class TransformerBlock(nn.Module):
                 x = a + x if i == 0 else self.gated_res(a, x)
 
         if self.gated_res is None or n_attn == 1:
-            x += self.dropout(full_attn)
+            x = x + self.dropout(full_attn)
         else:
             x = self.dropout(x)
         x = self.attn_norm(x)
@@ -265,16 +265,16 @@ class TransformerModule(nn.Module):
     def __init__(self, n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
                  padding_idx, n_heads, dropout, embed_dropout, attn_dropout, ff_dropout,
                  normalize_embeddings, n_segments=None, constant_embedding=False,
-                 successive_attention=False):
+                 successive_attention=False, sparse_embeddings=False):
         super(TransformerModule, self).__init__()
 
         self._constant_embedding = constant_embedding
 
-        self.embeddings = nn.Embedding(n_embeddings, embeddings_size, padding_idx=padding_idx)
+        self.embeddings = nn.Embedding(n_embeddings, embeddings_size, padding_idx=padding_idx, sparse=sparse_embeddings)
         if self._constant_embedding:
             self.pos_embeddings = ConstantPositionalEmbedding(embeddings_size, padding_idx=0)
         else:
-            self.pos_embeddings = nn.Embedding(n_pos_embeddings + 1, embeddings_size, padding_idx=0)
+            self.pos_embeddings = nn.Embedding(n_pos_embeddings + 1, embeddings_size, padding_idx=0, sparse=sparse_embeddings)
 
         self.embed_dropout = nn.Dropout(embed_dropout)
         self.layers = nn.ModuleList([TransformerBlock(embeddings_size, n_heads, dropout, attn_dropout, ff_dropout, successive_attention)

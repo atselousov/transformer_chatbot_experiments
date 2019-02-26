@@ -73,30 +73,28 @@ class Trainer:
             {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
             ]
 
-        try:
-            from apex.optimizers import FusedAdam
-            base_optimizer = FusedAdam(optimizer_grouped_parameters, lr=lr, bias_correction=False, max_grad_norm=1.0)
-        except ImportError:
-            logger.info("Apex not found, not using FusedAdam.")
-            base_optimizer = Adam(optimizer_grouped_parameters, lr=lr)
+        base_optimizer = Adam(optimizer_grouped_parameters, lr=lr)
         if fp16:
+            assert self.model.sparse_embeddings == False
+
             try:
                 from apex.optimizers import FP16_Optimizer
                 from apex.optimizers import FusedAdam
             except ImportError:
                 raise ImportError("Please install apex for fp16.")
-            base_optimizer = FusedAdam(optimizer_grouped_parameters, lr=lr, bias_correction=False, max_grad_norm=1.0)
+
+            base_optimizer = FusedAdam(optimizer_grouped_parameters, lr=lr, bias_correction=False)
             if loss_scale == 0:
                 base_optimizer = FP16_Optimizer(base_optimizer, dynamic_loss_scale=True)
             else:
                 base_optimizer = FP16_Optimizer(base_optimizer, static_loss_scale=loss_scale)
         if not linear_schedule:
-            self.optimizer = NoamOpt(self.model.embeddings_size, 1, lr_warmup, base_optimizer, linear_schedule=False, fp16=fp16)
+            self.optimizer = NoamOpt(self.model.embeddings_size, lr_warmup, base_optimizer, lr=lr, linear_schedule=False, fp16=fp16)
         else:
             total_steps = len(train_dataset) * n_epochs // train_batch_size
             if local_rank != -1:
                 total_steps = total_steps // torch.distributed.get_world_size()
-            self.optimizer = NoamOpt(self.model.embeddings_size, 1, lr_warmup, base_optimizer, linear_schedule=True,
+            self.optimizer = NoamOpt(self.model.embeddings_size, lr_warmup, base_optimizer, linear_schedule=True,
             lr=lr, total_steps=total_steps, fp16=fp16)
 
         if local_rank == -1:
@@ -230,12 +228,12 @@ class Trainer:
                     beams = torch.cat(beams, dim=0)
                     beam_lens = torch.cat(beam_lens, dim=0)
                 else:
-                    beams, beam_lens = self.model.beam_search(enc_contexts=enc_contexts, beam_starts=None, return_beams=True)
+                    beams, beam_lens = self.model.beam_search(enc_contexts=enc_contexts, return_beams=True)
                 self.model.train()  # re-activate dropout
 
                 labels = targets if targets.dim() == 2 else targets[:, :, 0]
                 labels_lens = labels.ne(self.model.padding_idx).sum(dim=-1)
-                labels_start = [context.shape[1] + 1 for context in contexts] if self.single_input else [1] * len(contexts)
+                labels_start = [context.shape[1] + 1 for context in contexts] if self.single_input else [1] * len(labels)
                 labels = [t[s:l-1].tolist() for t, s, l in zip(labels, labels_start, labels_lens)]
                 batch_risks = []
                 for b in range(beams.shape[1]):
@@ -267,7 +265,8 @@ class Trainer:
             s2s_loss = (i * s2s_loss + batch_s2s_loss.item()) / (i + 1)
             risk_loss = (i * risk_loss + batch_risk_loss.item()) / (i + 1)
             hits_loss = (i * hits_loss + batch_hits_loss.item()) / (i + 1)
-            tqdm_data.set_postfix({'lm_loss': lm_loss, 's2s_loss': s2s_loss, 'risk_loss': risk_loss, 'hits_loss': hits_loss})
+            tqdm_data.set_postfix({'lm_loss': lm_loss, 's2s_loss': s2s_loss,
+                                   'risk_loss': risk_loss, 'hits_loss': hits_loss})
 
             if (i + 1) % self.batch_split == 0:
                 if self.clip_grad is not None:
@@ -279,11 +278,11 @@ class Trainer:
 
                 # logging
                 global_step = (epoch * len(self.train_dataloader) + (i + 1)) // self.batch_split
-                self.writer.add_scalar("losses/batch_lm_loss", batch_lm_loss.item(), global_step=global_step)
-                self.writer.add_scalar("losses/batch_risk_loss", batch_risk_loss.item(), global_step=global_step)
-                self.writer.add_scalar("losses/batch_hits_loss", batch_hits_loss.item(), global_step=global_step)
-                self.writer.add_scalar("losses/batch_s2s_loss", batch_s2s_loss.item(), global_step=global_step)
-                self.writer.add_scalar("losses/full_loss", full_loss.item(), global_step=global_step)
+                self.writer.add_scalar("training/lm_loss", lm_loss, global_step=global_step)
+                self.writer.add_scalar("training/risk_loss", risk_loss, global_step=global_step)
+                self.writer.add_scalar("training/hits_loss", hits_loss, global_step=global_step)
+                self.writer.add_scalar("training/s2s_loss", s2s_loss, global_step=global_step)
+                self.writer.add_scalar("training/full_loss", full_loss, global_step=global_step)
                 self.writer.add_scalar("training/lr", self.optimizer.get_lr(), global_step=global_step)
 
 

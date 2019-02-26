@@ -97,6 +97,7 @@ def main():
                                    dialog_embeddings=trainer_config.dialog_embeddings,
                                    share_models=model_config.share_models,
                                    successive_attention=model_config.successive_attention,
+                                   sparse_embeddings=model_config.sparse_embeddings,
                                    vocab=None)  # for beam search debugging
 
     if not trainer_config.load_last:
