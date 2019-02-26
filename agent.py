@@ -102,7 +102,13 @@ class TransformerAgent(Agent):
                                           normalize_embeddings=model_config.normalize_embeddings,
                                           multiple_choice_head=model_config.multiple_choice_head,
                                           constant_embedding=model_config.constant_embedding,
-                                          vocab=self.vocab
+                                          vocab=self.vocab,
+                                          single_input=model_config.single_input,
+                                          dialog_embeddings=model_config.dialog_embeddings,
+                                          share_models=model_config.share_models,
+                                          successive_attention=model_config.successive_attention,
+                                          sparse_embeddings=model_config.sparse_embeddings,
+                                          shared_attention=model_config.sparse_embeddings
                                           )
 
             state_dict = torch.load(model_config.checkpoint_path, map_location=lambda storage, loc: storage)

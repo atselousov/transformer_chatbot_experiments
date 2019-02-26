@@ -93,8 +93,8 @@ def main():
                                    diversity_groups=model_config.diversity_groups,
                                    multiple_choice_head=model_config.multiple_choice_head,
                                    constant_embedding=model_config.constant_embedding,
-                                   single_input=trainer_config.single_input,
-                                   dialog_embeddings=trainer_config.dialog_embeddings,
+                                   single_input=model_config.single_input,
+                                   dialog_embeddings=model_config.dialog_embeddings,
                                    share_models=model_config.share_models,
                                    successive_attention=model_config.successive_attention,
                                    sparse_embeddings=model_config.sparse_embeddings,
@@ -115,7 +115,7 @@ def main():
     logger.info('loading datasets')
     train_dataset = FacebookDataset(trainer_config.train_datasets, vocab,
                                     max_lengths=(transformer.n_pos_embeddings - 1) // (3 if trainer_config.single_input else 1),  # A bit restrictive here
-                                    dialog_embeddings=trainer_config.dialog_embeddings,
+                                    dialog_embeddings=model_config.dialog_embeddings,
                                     cache=trainer_config.train_datasets_cache,
                                     use_start_end=trainer_config.use_start_end,
                                     negative_samples=trainer_config.negative_samples,
@@ -124,7 +124,7 @@ def main():
                                     limit_size=trainer_config.limit_train_size)
     test_dataset = FacebookDataset(trainer_config.test_datasets, vocab,
                                    max_lengths=(transformer.n_pos_embeddings - 1) // (3 if trainer_config.single_input else 1),  # A bit restrictive here
-                                   dialog_embeddings=trainer_config.dialog_embeddings,
+                                   dialog_embeddings=model_config.dialog_embeddings,
                                    cache=trainer_config.test_datasets_cache,
                                    use_start_end=trainer_config.use_start_end,
                                    negative_samples=-1,  # Keep all negative samples
@@ -146,7 +146,7 @@ def main():
                             lm_weight=trainer_config.lm_weight,
                             risk_weight=trainer_config.risk_weight,
                             hits_weight=trainer_config.hits_weight,
-                            single_input=trainer_config.single_input,
+                            single_input=model_config.single_input,
                             n_jobs=trainer_config.n_jobs,
                             clip_grad=trainer_config.clip_grad,
                             device=device,
