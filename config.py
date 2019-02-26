@@ -35,7 +35,8 @@ def get_model_config():
                        'multiple_choice_head': env_config('MULTIPLE_CHOICE_HEAD', default=False, cast=bool),
                        'share_models': env_config('SHARE_MODELS', default=True, cast=bool),
                        'successive_attention': env_config('SUCCESSIVE_ATTENTION', default=False, cast=bool),
-                       'sparse_embeddings': env_config('SPARSE_EMBEDDINGS', default=True, cast=bool)})
+                       'sparse_embeddings': env_config('SPARSE_EMBEDDINGS', default=True, cast=bool),
+                       'shared_attention': env_config('SHARED_ATTENTION', default=True, cast=bool)})
     if config.annealing_topk == 'None':
         config.annealing_topk = None
     if config.annealing_topk is not None:

@@ -192,3 +192,9 @@ def load_openai_weights(model, directory, n_special_tokens=0):
             weights = weights[0].transpose((1, 0))
 
         pointer.data[...] = torch.from_numpy(weights)
+
+    # Initialize shared attention layer is necessary
+    if model.layers[0].context_attn is not None:
+        for layer in model.layers:
+            for a_p, ca_p in zip(layer.attn.parameters(), layer.context_attn.parameters()):
+                ca_p.data.copy_(a_p.data)

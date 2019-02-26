@@ -57,7 +57,8 @@ class TransformerModel(nn.Module):
                  length_penalty=0.8, annealing_topk=None, annealing=0, normalize_embeddings=True,
                  diversity_coef=0, diversity_groups=1, n_segments=None, multiple_choice_head=False,
                  single_input=False, dialog_embeddings=False, vocab=None, constant_embedding=False,
-                 share_models=True, successive_attention=False, sparse_embeddings=False):
+                 share_models=True, successive_attention=False, sparse_embeddings=False,
+                 shared_attention=True):
 
         super(TransformerModel, self).__init__()
 
@@ -91,14 +92,16 @@ class TransformerModel(nn.Module):
                                                     ff_dropout, normalize_embeddings, n_segments,
                                                     constant_embedding=constant_embedding,
                                                     successive_attention=successive_attention,
-                                                    sparse_embeddings=sparse_embeddings)
+                                                    sparse_embeddings=sparse_embeddings,
+                                                    shared_attention=shared_attention)
         if not share_models:
             self.encoder_module = TransformerModule(n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
                                                     padding_idx, n_heads, dropout, embed_dropout, attn_dropout,
                                                     ff_dropout, normalize_embeddings, n_segments,
                                                     constant_embedding=constant_embedding,
                                                     successive_attention=successive_attention,
-                                                    sparse_embeddings=sparse_embeddings)
+                                                    sparse_embeddings=sparse_embeddings,
+                                                    shared_attention=shared_attention)
         self.pre_softmax = nn.Linear(embeddings_size, n_embeddings, bias=False)
         self.pre_softmax.weight = self.transformer_module.embeddings.weight
         self.multiple_choice_head = MultipleChoiceHead(self.embeddings_size, dropout) if multiple_choice_head else None
