@@ -157,6 +157,34 @@ class TransformerAgent(Agent):
 
         return persona_info, dialog
 
+    def _process_info(self, info):
+        info = self._add_start_end(info[:self.model.n_pos_embeddings - (2 if self.dialog_embeddings else 0)],
+                                   self.vocab.info_bos_id,
+                                   self.vocab.info_eos_id)
+        info = self._add_dialog_embeddings(info, self.vocab.info_dialog_id)
+
+        return info
+
+    def _process_1st_replica(self, replica):
+        replica = self._add_start_end(replica, self.vocab.talker1_bos_id, self.vocab.talker1_eos_id)
+        replica = self._add_dialog_embeddings(replica, self.vocab.talker1_dialog_id)
+        return replica
+
+    def _process_2nd_replica(self, replica):
+        replica = self._add_start_end(replica, self.vocab.talker2_bos_id, self.vocab.talker2_eos_id)
+        replica = self._add_dialog_embeddings(replica, self.vocab.talker2_dialog_id)
+        return replica
+
+    def _add_dialog_embeddings(self, toks, dialog_tok):
+        if self.dialog_embeddings:
+            toks = [[t, dialog_tok] for t in toks]
+        return toks
+
+    def _add_start_end(self, toks, start, end):
+        if self.use_start_end:
+            toks = [start] + toks + [end]
+        return toks
+
     def observe(self, observation):
         if self.episode_done:
             self.reset()
@@ -167,23 +195,12 @@ class TransformerAgent(Agent):
 
             info = sum([self.vocab.string2ids(i) for i in info], [])
             if info:
-                info = (self.history['info'][1:-1] + info)[:self.model.n_pos_embeddings]
-                if self.use_start_end:
-                    info = [self.vocab.info_bos_id] + info[:self.model.n_pos_embeddings-2] + [self.vocab.info_eos_id]
-                if self.dialog_embeddings:
-                    info = [[t, self.vocab.info_dialog_id] for t in info]
-
-                self.history['info'] = info
+                prev_info = [h[0] for h in self.history['info']] if self.dialog_embeddings else self.history['info']
+                self.history['info'] = self._process_info(prev_info[1:-1] + info)
 
             for i, replica in enumerate(dialog, 1):
                 replica = self.vocab.string2ids(replica)
-                if i % 2 == 1 and self.use_start_end:
-                    replica = [self.vocab.talker1_bos_id] + replica + [self.vocab.talker1_eos_id]
-                elif self.use_start_end:
-                    replica = [self.vocab.talker2_bos_id] + replica + [self.vocab.talker2_eos_id]
-                if self.dialog_embeddings:
-                    replica = [[t, self.vocab.talker1_dialog_id if i % 2 == 1 else self.vocab.talker2_dialog_id]
-                               for t in replica]
+                replica = self._process_1st_replica(replica) if i % 2 == 1 else self._process_2nd_replica(replica)
                 self.history['dialog'].extend(replica)
 
         observation['agent'] = self        
@@ -236,11 +253,7 @@ class TransformerAgent(Agent):
             pred_texts = self.model.beam_search(enc_contexts)
 
             for i in range(batch_size):
-                pred_toks = pred_texts[i]
-                if self.use_start_end:
-                    pred_toks = [self.vocab.talker2_bos_id] + pred_toks + [self.vocab.talker2_eos_id]
-                if self.dialog_embeddings:
-                    pred_toks = [[t, self.vocab.talker2_dialog_id] for t in pred_toks]
+                pred_toks = self._process_2nd_replica(pred_texts[i])
 
                 valid_observations[i]['agent'].history['dialog'].extend(pred_toks)
                 batch_reply[valid_ids[i]]['text'] = self.vocab.ids2string(pred_texts[i])
