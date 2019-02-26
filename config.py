@@ -38,7 +38,8 @@ def get_model_config():
                        'sparse_embeddings': env_config('SPARSE_EMBEDDINGS', default=True, cast=bool),
                        'shared_attention': env_config('SHARED_ATTENTION', default=True, cast=bool),
                        'dialog_embeddings': env_config('DIALOG_EMBEDDINGS', default=True, cast=bool),
-                       'single_input': env_config('SINGLE_INPUT', default=False, cast=bool)})
+                       'single_input': env_config('SINGLE_INPUT', default=False, cast=bool),
+                       'use_start_end': env_config('USE_START_END', default=True, cast=bool)})
     if config.annealing_topk == 'None':
         config.annealing_topk = None
     if config.annealing_topk is not None:
@@ -59,7 +60,6 @@ def get_trainer_config():
                        'risk_weight': env_config('RISK_WEIGHT', default=0, cast=float),
                        'hits_weight': env_config('HITS_WEIGHT', default=0, cast=float),
                        'negative_samples': env_config('NEGATIVE_SAMPLES', default=0, cast=int),
-                       'use_start_end': env_config('USE_START_END', default=False, cast=bool),
                        'n_jobs': 4,
                        'label_smoothing': env_config('LABEL_SMOOTHING', default=0.1, cast=float),
                        'clip_grad': None,

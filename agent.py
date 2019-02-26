@@ -61,6 +61,7 @@ class TransformerAgent(Agent):
         self.clean_emoji = self.opt['clean_emoji']
         self.check_grammar = self.opt['check_grammar']
         self.dialog_embeddings = model_config.dialog_embeddings
+        self.use_start_end = model_config.use_start_end
 
         # 'max_seq_len': 128,
         # 'beam_size': 1,
@@ -166,8 +167,9 @@ class TransformerAgent(Agent):
 
             info = sum([self.vocab.string2ids(i) for i in info], [])
             if info:
-                info = (self.history['info'][1:-1] + info)[:self.model.n_pos_embeddings-3]
-                info = [self.vocab.info_bos_id] + info + [self.vocab.info_eos_id]
+                info = (self.history['info'][1:-1] + info)[:self.model.n_pos_embeddings]
+                if self.use_start_end:
+                    info = [self.vocab.info_bos_id] + info[:self.model.n_pos_embeddings-2] + [self.vocab.info_eos_id]
                 if self.dialog_embeddings:
                     info = [[t, self.vocab.info_dialog_id] for t in info]
 
@@ -175,9 +177,9 @@ class TransformerAgent(Agent):
 
             for i, replica in enumerate(dialog, 1):
                 replica = self.vocab.string2ids(replica)
-                if i % 2 == 1:
+                if i % 2 == 1 and self.use_start_end:
                     replica = [self.vocab.talker1_bos_id] + replica + [self.vocab.talker1_eos_id]
-                else:
+                elif self.use_start_end:
                     replica = [self.vocab.talker2_bos_id] + replica + [self.vocab.talker2_eos_id]
                 if self.dialog_embeddings:
                     replica = [[t, self.vocab.talker1_dialog_id if i % 2 == 1 else self.vocab.talker2_dialog_id]
@@ -234,7 +236,9 @@ class TransformerAgent(Agent):
             pred_texts = self.model.beam_search(enc_contexts)
 
             for i in range(batch_size):
-                pred_toks = [self.vocab.talker2_bos_id] + pred_texts[i] + [self.vocab.talker2_eos_id]
+                pred_toks = pred_texts[i]
+                if self.use_start_end:
+                    pred_toks = [self.vocab.talker2_bos_id] + pred_toks + [self.vocab.talker2_eos_id]
                 if self.dialog_embeddings:
                     pred_toks = [[t, self.vocab.talker2_dialog_id] for t in pred_toks]
 

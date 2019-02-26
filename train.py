@@ -117,7 +117,7 @@ def main():
                                     max_lengths=(transformer.n_pos_embeddings - 1) // (3 if trainer_config.single_input else 1),  # A bit restrictive here
                                     dialog_embeddings=model_config.dialog_embeddings,
                                     cache=trainer_config.train_datasets_cache,
-                                    use_start_end=trainer_config.use_start_end,
+                                    use_start_end=model_config.use_start_end,
                                     negative_samples=trainer_config.negative_samples,
                                     augment=trainer_config.persona_augment,
                                     aug_syn_proba=trainer_config.persona_aug_syn_proba,
@@ -126,7 +126,7 @@ def main():
                                    max_lengths=(transformer.n_pos_embeddings - 1) // (3 if trainer_config.single_input else 1),  # A bit restrictive here
                                    dialog_embeddings=model_config.dialog_embeddings,
                                    cache=trainer_config.test_datasets_cache,
-                                   use_start_end=trainer_config.use_start_end,
+                                   use_start_end=model_config.use_start_end,
                                    negative_samples=-1,  # Keep all negative samples
                                    augment=False,
                                    aug_syn_proba=0.0,
