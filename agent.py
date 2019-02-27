@@ -62,6 +62,7 @@ class TransformerAgent(Agent):
         self.check_grammar = self.opt['check_grammar']
         self.dialog_embeddings = model_config.dialog_embeddings
         self.use_start_end = model_config.use_start_end
+        self.single_input = model_config.single_input
 
         # 'max_seq_len': 128,
         # 'beam_size': 1,
@@ -249,8 +250,7 @@ class TransformerAgent(Agent):
                     dialogs = dialogs.cuda()
                 contexts.append(dialogs)
 
-            enc_contexts = [self.model.encode(c) for c in contexts]
-            pred_texts = self.model.beam_search(enc_contexts)
+            pred_texts = self.model.predict(contexts)
 
             for i in range(batch_size):
                 pred_toks = self._process_2nd_replica(pred_texts[i])
@@ -260,6 +260,10 @@ class TransformerAgent(Agent):
                 batch_reply[valid_ids[i]]['episode_done'] = valid_observations[i]['agent'].episode_done
 
             if self.opt['rank_candidates']:
+                if self.single_input:
+                    raise NotImplementedError()
+
+                enc_contexts = [self.model.encode(c) for c in contexts]
                 candidates = [list(obs.get('label_candidates', [])) for obs in valid_observations]
                 lens_candidates = [len(c) for c in candidates]
 
