@@ -10,7 +10,7 @@ from model.sentiment import pick_emoji, clean_emoji
 from config import get_model_config
 import random
 
-      
+
 class TransformerAgent(Agent):
     @staticmethod
     def add_cmdline_args(argparser):
@@ -238,23 +238,27 @@ class TransformerAgent(Agent):
 
             if max(map(len, infos)) > 0:
                 infos = [torch.tensor(i, dtype=torch.long) for i in infos]
-                infos = pad_sequence(infos, batch_first=True, padding_value=self.model.padding_idx)
-                if self.use_cuda:
-                    infos = infos.cuda()
                 contexts.append(infos)
 
             if max(map(len, dialogs)) > 0:
                 dialogs = [torch.tensor(d, dtype=torch.long) for d in dialogs]
-                dialogs = pad_sequence(dialogs, batch_first=True, padding_value=self.model.padding_idx)
-                if self.use_cuda:
-                    dialogs = dialogs.cuda()
                 contexts.append(dialogs)
 
-            pred_texts = self.model.predict(contexts)
+            if self.single_input:
+                contexts = [torch.cat(c, dim=0).unsqueeze(0) for c in zip(*(contexts))]
+            else:
+                contexts = map(lambda x: pad_sequence(x, batch_first=True, padding_value=self.model.padding_idx),
+                               contexts)
+
+            if self.use_cuda:
+                contexts = list(map(lambda x: x.cuda(), contexts))
+
+            # because different lens of context when single_input == True
+            pred_texts = [self.model.predict(c)[0] for c in contexts] if self.single_input \
+                          else self.model.predict(contexts)
 
             for i in range(batch_size):
                 pred_toks = self._process_2nd_replica(pred_texts[i])
-
                 valid_observations[i]['agent'].history['dialog'].extend(pred_toks)
                 batch_reply[valid_ids[i]]['text'] = self.vocab.ids2string(pred_texts[i])
                 batch_reply[valid_ids[i]]['episode_done'] = valid_observations[i]['agent'].episode_done
