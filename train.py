@@ -216,11 +216,25 @@ def main():
         scores = f1_score(predictions, targets, average=False)
         return [1-s for s in scores]
 
+    def get_risk_metric_func(risk_metric):
+        """ risk_metric selected in:
+            f1, meteor, avg_len, nist_{1, 2, 3, 4}, entropy_{1, 2, 3, 4}, div_{1, 2}, bleu_{1, 2, 3, 4}
+        """
+        def external_metric_risk(predictions, targets):
+            string_targets = list(vocab.ids2string(t) for t in targets)
+            string_predictions = list(vocab.ids2string(t) for t in predictions)
+            metrics = [external_metrics_func([t], [p], epoch=-1)[risk_metric] for p, t in zip(string_predictions, string_targets)]
+            return metrics
+        if risk_metric == 'f1':
+            return f1_risk
+        return external_metric_risk
+
     # helpers -----------------------------------------------------
 
 
     try:
-        model_trainer.train(after_epoch_funcs=[save_func, sample_text_func, test_func], risk_func=f1_risk)
+        model_trainer.train(after_epoch_funcs=[save_func, sample_text_func, test_func],
+                            risk_func=get_risk_metric_func(trainer_config.risk_metric))
     except (KeyboardInterrupt, Exception, RuntimeError) as e:
         torch.save(model_trainer.state_dict(), interrupt_checkpoint_path)
         raise e
