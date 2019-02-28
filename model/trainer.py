@@ -367,7 +367,7 @@ class Trainer:
                 tqdm_data.set_postfix(dict(**metrics))
 
             if external_metrics_func and self.evaluate_full_sequences:
-                external_metrics = external_metrics_func(full_references, full_predictions)
+                external_metrics = external_metrics_func(full_references, full_predictions, epoch)
                 metrics.update(external_metrics)
 
             # logging

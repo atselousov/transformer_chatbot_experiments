@@ -42,15 +42,15 @@ def main():
         ptvsd.enable_attach(address=(args.server_ip, args.server_port), redirect_output=True)
         ptvsd.wait_for_attach()
 
+    model_config = get_model_config()
+    trainer_config = get_trainer_config()
+
     # Log only on main process
     if args.local_rank not in [-1, 0]:
         sys.stdout = open(f"./runs/log_distributed_{args.local_rank}", "w")  # dump sdtout
         writer = DummyWriter()
     else:
-        writer = SummaryWriter()
-
-    model_config = get_model_config()
-    trainer_config = get_trainer_config()
+        writer = SummaryWriter(comment=trainer_config.writer_comment)
 
     logger.info("model config: {}".format(model_config))
     logger.info("trainer config: {}".format(trainer_config))
@@ -165,9 +165,9 @@ def main():
 
 
     # helpers -----------------------------------------------------
-    def external_metrics_func(full_references, full_predictions):
-        references_file_path = os.path.join(writer.log_dir, trainer_config.eval_references_file)
-        predictions_file_path = os.path.join(writer.log_dir, trainer_config.eval_predictions_file)
+    def external_metrics_func(full_references, full_predictions, epoch):
+        references_file_path = os.path.join(writer.log_dir, trainer_config.eval_references_file + "_{}".format(epoch))
+        predictions_file_path = os.path.join(writer.log_dir, trainer_config.eval_predictions_file + "_{}".format(epoch))
         with open(references_file_path, 'w', encoding='utf-8') as f:
             f.write(unicode('\n'.join(full_references)))
         with open(predictions_file_path, 'w', encoding='utf-8') as f:

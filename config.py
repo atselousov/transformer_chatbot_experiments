@@ -4,6 +4,7 @@ import torch
 from model.utils import openai_transformer_config
 import git
 from decouple import config as env_config
+from decouple import Csv
 
 
 repo = git.Repo(search_parent_directories=True)
@@ -22,16 +23,16 @@ def get_model_config():
                        'embed_dropout': default_config.embed_dropout,
                        'attn_dropout': default_config.attn_dropout,
                        'ff_dropout': default_config.ff_dropout,
-                       'normalize_embeddings': False,  # Used in pretrained last checkpoint for ConvAI2
+                       'normalize_embeddings': env_config('NORMALIZE_EMBEDDINGS', default=False, cast=bool),
                        'max_seq_len': 128,
                        'beam_size': env_config('BEAM_SIZE', default=3, cast=int),
                        'diversity_coef': env_config('DIVERSITY_COEF', default=0, cast=int),
                        'diversity_groups': env_config('DIVERSITY_GROUP', default=1, cast=int),
                        'annealing_topk': env_config('ANNEALING_TOPK', default=None),
                        'annealing': env_config('ANNEALING', default=0, cast=float),
-                       'length_penalty': 0.6,
+                       'length_penalty': env_config('LENGTH_PENALTY', default=0.6, cast=float),
                        'n_segments': None,
-                       'constant_embedding': False,
+                       'constant_embedding': env_config('CONSTANT_EMBEDDINGS', default=False, cast=bool),
                        'multiple_choice_head': env_config('MULTIPLE_CHOICE_HEAD', default=False, cast=bool),
                        'share_models': env_config('SHARE_MODELS', default=True, cast=bool),
                        'successive_attention': env_config('SUCCESSIVE_ATTENTION', default=False, cast=bool),
@@ -45,7 +46,8 @@ def get_model_config():
 
 
 def get_trainer_config():
-    config = AttrDict({'n_epochs': env_config('N_EPOCHS', default=5, cast=int),
+    config = AttrDict({'n_epochs': env_config('N_EPOCHS', default=3, cast=int),
+                       'writer_comment': env_config('WRITER_COMMENT', default='', cast=str),
                        'train_batch_size': env_config('TRAIN_BATCH_SIZE', default=128, cast=int),
                        'batch_split': env_config('BATCH_SPLIT', default=32, cast=int),
                        'test_batch_size': env_config('TEST_BATCH_SIZE', default=8, cast=int),
@@ -83,13 +85,9 @@ def get_trainer_config():
                        'eval_references_file': 'eval_references_file',
                        'eval_predictions_file': 'eval_predictions_file',
                        'interrupt_checkpoint_path': 'interrupt_checkpoint',  # there are now in the ./runs/XXX/ experiments folders
-                       'train_datasets': ['./datasets/ConvAI2/train_self_original.txt',],
-                                          #'./datasets/ConvAI2/train_self_revised.txt',
-                                          #'./datasets/DailyDialog/train_dailydialog.txt'],
+                       'train_datasets': env_config('TRAIN_DATASETS', default='datasets/ConvAI2/train_self_original.txt', cast=Csv(str)),
                        'train_datasets_cache': 'train_cache.bin',
-                       'test_datasets': ['./datasets/ConvAI2/valid_self_original.txt',],
-                                         # './datasets/ConvAI2/valid_self_revised_no_cands.txt',
-                                         # './datasets/DailyDialog/valid_dailydialog.txt'],
+                       'test_datasets': env_config('TEST_DATASETS', default='datasets/ConvAI2/valid_self_original.txt', cast=Csv(str)),
                        'test_datasets_cache': 'test_cache.bin'})
 
     local_config = deepcopy(config)
