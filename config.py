@@ -76,6 +76,7 @@ def get_trainer_config():
                        'evaluate_full_sequences': env_config('EVALUATE_FULL_SEQUENCES', default=True, cast=bool),
                        'limit_eval_size': env_config('LIMIT_EVAL_TIME', default=-1, cast=int),
                        'limit_train_size': env_config('LIMIT_TRAIN_TIME', default=-1, cast=int),
+                       'risk_metric': env_config('RISK_METRIC', default='f1', cast=str),
                        'load_last': '', #./checkpoints/last_checkpoint',  # Now that we save several experiments you can put the path of the checpoint file you want to load here
                        'repo_id': str(repo),
                        'repo_sha': str(repo.head.object.hexsha),
@@ -97,7 +98,7 @@ def get_trainer_config():
     local_config.negative_samples = 2
     local_config.n_jobs = 0
     local_config.device = 'cpu'
-    # local_config.load_last = './checkpoints/last_checkpoint'
+    local_config.risk_weight = 1
     local_config.fp16 = False
     local_config.train_datasets_cache = './datasets/train_datasets_cache.bin'
     local_config.test_datasets_cache = './datasets/test_datasets_cache.bin'
