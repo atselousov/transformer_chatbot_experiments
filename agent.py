@@ -220,7 +220,11 @@ class TransformerAgent(Agent):
 
         def to_tensor(string):
             ids = [self.vocab.bos_id] + self.vocab.string2ids(string) + [self.vocab.eos_id]
+            ids = self._add_dialog_embeddings(ids, self.vocab.sent_dialog_id)
             return torch.tensor(ids, dtype=torch.long)
+
+        def to_cuda(data_list):
+            return list(map(lambda x: x.cuda(), data_list)) if self.use_cuda else data_list
 
         batch_reply = [{'id': self.getID(), 'text': '', 'text_candidates': []} for _ in range(len(observations))]
         valid_ids = [i for i, obs in enumerate(observations) if is_valid_history(obs['agent'].history)]
@@ -250,10 +254,9 @@ class TransformerAgent(Agent):
                 contexts = map(lambda x: pad_sequence(x, batch_first=True, padding_value=self.model.padding_idx),
                                contexts)
 
-            if self.use_cuda:
-                contexts = list(map(lambda x: x.cuda(), contexts))
+            contexts = to_cuda(contexts)
 
-            # because different lens of context when single_input == True
+            # because of different lens of context when single_input == True
             pred_texts = [self.model.predict(c)[0] for c in contexts] if self.single_input \
                           else self.model.predict(contexts)
 
@@ -265,9 +268,11 @@ class TransformerAgent(Agent):
 
             if self.opt['rank_candidates']:
                 if self.single_input:
-                    raise NotImplementedError()
+                    enc_contexts = []
+                    contexts = list(map(lambda x: x.squeeze(0), contexts))
+                else:
+                    enc_contexts = [self.model.encode(c) for c in contexts]
 
-                enc_contexts = [self.model.encode(c) for c in contexts]
                 candidates = [list(obs.get('label_candidates', [])) for obs in valid_observations]
                 lens_candidates = [len(c) for c in candidates]
 
@@ -277,13 +282,28 @@ class TransformerAgent(Agent):
 
                     for i in range(max(lens_candidates)):
                         current_cands = [to_tensor(c[i])[:self.model.n_pos_embeddings-1] for c in candidates]
-                        current_cands = pad_sequence(current_cands, batch_first=True, padding_value=self.model.padding_idx)
-                        if self.use_cuda:
-                            current_cands = current_cands.cuda()
+                        current_cands = to_cuda(current_cands)
 
+                        if self.single_input:
+                            lens = map(lambda x: x.size(0), current_cands)
+                            current_cands = [torch.cat(c, dim=0)[:self.model.n_pos_embeddings-1] for c in
+                                             zip(contexts, current_cands)]
+
+                        current_cands = pad_sequence(current_cands, batch_first=True,
+                                                     padding_value=self.model.padding_idx)
                         logits = self.model.decode(current_cands[:, :-1], enc_contexts)
+
+                        if current_cands.dim() == 3:
+                            current_cands = current_cands[:, :, 0]
+
                         log_probas = F.log_softmax(logits, dim=-1)
                         log_probas = torch.gather(log_probas, -1, current_cands[:, 1:].unsqueeze(-1)).squeeze(-1)
+
+                        if self.single_input:
+                            # zero context
+                            for j, l in enumerate(lens):
+                                current_cands[j, :-l+1] = self.model.padding_idx
+
                         log_probas.masked_fill_(current_cands[:, 1:].eq(self.model.padding_idx), 0)
 
                         current_lens = current_cands[:, 1:].ne(self.model.padding_idx).float().sum(dim=-1)
