@@ -114,7 +114,7 @@ def main():
 
     logger.info('loading datasets')
     train_dataset = FacebookDataset(trainer_config.train_datasets, vocab,
-                                    max_lengths=(transformer.n_pos_embeddings - 1) // (3 if trainer_config.single_input else 1),  # A bit restrictive here
+                                    max_lengths=(transformer.n_pos_embeddings - 1) // (3 if model_config.single_input else 1),  # A bit restrictive here
                                     dialog_embeddings=model_config.dialog_embeddings,
                                     cache=trainer_config.train_datasets_cache,
                                     use_start_end=model_config.use_start_end,
@@ -123,7 +123,7 @@ def main():
                                     aug_syn_proba=trainer_config.persona_aug_syn_proba,
                                     limit_size=trainer_config.limit_train_size)
     test_dataset = FacebookDataset(trainer_config.test_datasets, vocab,
-                                   max_lengths=(transformer.n_pos_embeddings - 1) // (3 if trainer_config.single_input else 1),  # A bit restrictive here
+                                   max_lengths=(transformer.n_pos_embeddings - 1) // (3 if model_config.single_input else 1),  # A bit restrictive here
                                    dialog_embeddings=model_config.dialog_embeddings,
                                    cache=trainer_config.test_datasets_cache,
                                    use_start_end=model_config.use_start_end,
