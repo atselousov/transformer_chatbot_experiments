@@ -159,7 +159,7 @@ class TransformerAgent(Agent):
         return persona_info, dialog
 
     def _process_info(self, info):
-        info = self._add_start_end(info[:self.model.n_pos_embeddings - (2 if self.dialog_embeddings else 0)],
+        info = self._add_start_end(info[:self.model.n_pos_embeddings - (2 if self.use_start_end else 0)],
                                    self.vocab.info_bos_id,
                                    self.vocab.info_eos_id)
         info = self._add_dialog_embeddings(info, self.vocab.info_dialog_id)
@@ -249,7 +249,7 @@ class TransformerAgent(Agent):
                 contexts.append(dialogs)
 
             if self.single_input:
-                contexts = [torch.cat(c, dim=0).unsqueeze(0) for c in zip(*(contexts))]
+                contexts = [torch.cat(c, dim=0).unsqueeze(0) for c in zip(*contexts)]
             else:
                 contexts = map(lambda x: pad_sequence(x, batch_first=True, padding_value=self.model.padding_idx),
                                contexts)
