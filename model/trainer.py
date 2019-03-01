@@ -381,12 +381,11 @@ class Trainer:
             self._eval_test(metric_funcs, external_metrics_func, epoch)
 
     def train(self, after_epoch_funcs=[], risk_func=None):
+        for func in after_epoch_funcs:
+            func(-1)
+
         for epoch in range(self.n_epochs):
             self._eval_train(epoch, risk_func)
 
             for func in after_epoch_funcs:
                 func(epoch)
-
-        if self.n_epochs == 0:
-            for func in after_epoch_funcs:
-                func(-1)

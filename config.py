@@ -68,6 +68,7 @@ def get_trainer_config():
                        'test_period': 1,
                        'seed': 0,
                        'device': 'cuda',
+                       'zero_shot': env_config('ZERO_SHOT', default=False, cast=bool),
                        'persona_augment': env_config('PERSONA_AUGMENT', default=False, cast=bool),
                        'persona_aug_syn_proba': env_config('PERSONA_AUG_SYN_PROBA', default=0.0, cast=float),
                        'fp16': env_config('FP16', default=False, cast=bool),
@@ -99,6 +100,7 @@ def get_trainer_config():
     local_config.n_jobs = 0
     local_config.device = 'cpu'
     local_config.risk_weight = 1
+    local_config.zero_shot = True
     local_config.fp16 = False
     local_config.train_datasets_cache = './datasets/train_datasets_cache.bin'
     local_config.test_datasets_cache = './datasets/test_datasets_cache.bin'

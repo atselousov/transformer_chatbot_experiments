@@ -30,7 +30,6 @@ class SpacyLowerTokenizer:
 
         return words
 
-
 class BPEVocab:
     we = '</w>'
 
@@ -70,11 +69,27 @@ class BPEVocab:
 
         return set(zip(string[:-1], string[1:]))
 
-    def __init__(self, vocab, codes, tokenizer=SpacyLowerTokenizer()):
-        #TODO: add check for special tokens
-        self.spec_tokens = [BPEVocab.pad_token, BPEVocab.bos_token, BPEVocab.eos_token,
-                            BPEVocab.info_bos, BPEVocab.info_eos, BPEVocab.talker1_bos,
-                            BPEVocab.talker1_eos, BPEVocab.talker2_bos, BPEVocab.talker2_eos]
+    def __init__(self, vocab, codes, tokenizer=SpacyLowerTokenizer(), zero_shot=False):
+        if zero_shot: # only one additional token: BPEVocab.pad_token = <pad>
+            self.spec_tokens = [BPEVocab.pad_token]
+            self.bos_token = '"</w>'
+            self.eos_token = '"</w>'
+            self.info_bos = '.</w>'
+            self.info_eos = '.</w>'
+            self.talker1_bos = '"</w>'
+            self.talker1_eos = '"</w>'
+            self.talker2_bos = '"</w>'
+            self.talker2_eos = '"</w>'
+            self.sent_dialog_token = '"</w>'
+            self.info_dialog_token = '.</w>'
+            self.talker1_dialog_token = '"</w>'
+            self.talker2_dialog_token = '"</w>'
+        else:
+            #TODO: add check for special tokens
+            self.spec_tokens = [BPEVocab.pad_token, BPEVocab.bos_token, BPEVocab.eos_token,
+                                BPEVocab.info_bos, BPEVocab.info_eos, BPEVocab.talker1_bos,
+                                BPEVocab.talker1_eos, BPEVocab.talker2_bos, BPEVocab.talker2_eos]
+
         vocab = self.spec_tokens + vocab
 
         self.token2id = {t: i for i, t in enumerate(vocab)}
@@ -96,55 +111,55 @@ class BPEVocab:
 
     @property
     def pad_id(self):
-        return self.token2id[BPEVocab.pad_token]
+        return self.token2id[self.pad_token]
 
     @property
     def bos_id(self):
-        return self.token2id[BPEVocab.bos_token]
+        return self.token2id[self.bos_token]
 
     @property
     def eos_id(self):
-        return self.token2id[BPEVocab.eos_token]
+        return self.token2id[self.eos_token]
 
     @property
     def info_bos_id(self):
-        return self.token2id[BPEVocab.info_bos]
+        return self.token2id[self.info_bos]
 
     @property
     def info_eos_id(self):
-        return self.token2id[BPEVocab.info_eos]
+        return self.token2id[self.info_eos]
 
     @property
     def talker1_bos_id(self):
-        return self.token2id[BPEVocab.talker1_bos]
+        return self.token2id[self.talker1_bos]
 
     @property
     def talker1_eos_id(self):
-        return self.token2id[BPEVocab.talker1_eos]
+        return self.token2id[self.talker1_eos]
 
     @property
     def talker2_bos_id(self):
-        return self.token2id[BPEVocab.talker2_bos]
+        return self.token2id[self.talker2_bos]
 
     @property
     def talker2_eos_id(self):
-        return self.token2id[BPEVocab.talker2_eos]
+        return self.token2id[self.talker2_eos]
 
     @property
     def sent_dialog_id(self):
-        return self.token2id[BPEVocab.sent_dialog_token]
+        return self.token2id[self.sent_dialog_token]
 
     @property
     def info_dialog_id(self):
-        return self.token2id[BPEVocab.info_dialog_token]
+        return self.token2id[self.info_dialog_token]
 
     @property
     def talker1_dialog_id(self):
-        return self.token2id[BPEVocab.talker1_dialog_token]
+        return self.token2id[self.talker1_dialog_token]
 
     @property
     def talker2_dialog_id(self):
-        return self.token2id[BPEVocab.talker2_dialog_token]
+        return self.token2id[self.talker2_dialog_token]
 
     def get_prefix2words(self, convai_dict, smoothing_freq=5):
         # map BPE-prefix => dict(full_words beginning with BPE-prefix, associated words_counts)

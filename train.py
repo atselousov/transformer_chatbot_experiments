@@ -67,7 +67,7 @@ def main():
     set_seed(trainer_config.seed)
     device = torch.device(trainer_config.device)
 
-    vocab = BPEVocab.from_files(model_config.bpe_vocab_path, model_config.bpe_codes_path)
+    vocab = BPEVocab.from_files(model_config.bpe_vocab_path, model_config.bpe_codes_path, zero_shot=trainer_config.zero_shot)
 
     transformer = TransformerModel(n_layers=model_config.n_layers,
                                    n_embeddings=len(vocab),
