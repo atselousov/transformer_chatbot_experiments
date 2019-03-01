@@ -371,7 +371,7 @@ class Trainer:
                 metrics.update(external_metrics)
 
             # logging
-            global_step = epoch * len(self.train_dataloader) // self.batch_split
+            global_step = max((epoch + 1) * len(self.train_dataloader) // self.batch_split, 0)
             for key, value in metrics.items():
                 self.writer.add_scalar("eval/{}".format(key), value, global_step=global_step)
             logger.info(metrics)
