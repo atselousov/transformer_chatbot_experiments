@@ -20,6 +20,7 @@ import sys
 import io
 import json
 import random
+import copy
 from collections import namedtuple, Counter
 
 import torch
@@ -165,6 +166,7 @@ def load_openai_weights(model, directory, n_special_tokens=0):
         model.pos_embeddings.weight.data[1:] = torch.from_numpy(parameters_weights[0])
 
     parameters_weights[1] = parameters_weights[1][:model.embeddings.num_embeddings - n_special_tokens]
+    model.embeddings.weight.data[:n_special_tokens] = 0
     model.embeddings.weight.data[n_special_tokens:] = torch.from_numpy(parameters_weights[1])
 
     parameters_weights = parameters_weights[2:]
@@ -193,8 +195,8 @@ def load_openai_weights(model, directory, n_special_tokens=0):
 
         pointer.data[...] = torch.from_numpy(weights)
 
-    # Initialize shared attention layer is necessary
-    if model.layers[0].context_attn is not None:
+        # Initialize shared attention layer is necessary
         for layer in model.layers:
-            for a_p, ca_p in zip(layer.attn.parameters(), layer.context_attn.parameters()):
-                ca_p.data.copy_(a_p.data)
+            attn_state = layer.attn.state_dict()
+            for context_attn in layer.context_attns:
+                context_attn.load_state_dict(copy.deepcopy(attn_state))

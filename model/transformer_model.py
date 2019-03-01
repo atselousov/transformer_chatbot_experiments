@@ -58,7 +58,7 @@ class TransformerModel(nn.Module):
                  diversity_coef=0, diversity_groups=1, n_segments=None, multiple_choice_head=False,
                  single_input=False, dialog_embeddings=False, vocab=None, constant_embedding=False,
                  share_models=True, successive_attention=False, sparse_embeddings=False,
-                 shared_attention=True):
+                 shared_attention=True, context_size=2):
 
         super(TransformerModel, self).__init__()
 
@@ -93,7 +93,8 @@ class TransformerModel(nn.Module):
                                                     constant_embedding=constant_embedding,
                                                     successive_attention=successive_attention,
                                                     sparse_embeddings=sparse_embeddings,
-                                                    shared_attention=shared_attention)
+                                                    shared_attention=shared_attention,
+                                                    context_size=context_size)
         if not share_models:
             self.encoder_module = TransformerModule(n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
                                                     padding_idx, n_heads, dropout, embed_dropout, attn_dropout,

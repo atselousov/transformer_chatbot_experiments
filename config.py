@@ -40,7 +40,7 @@ def get_model_config():
                        'shared_attention': env_config('SHARED_ATTENTION', default=True, cast=bool),
                        'dialog_embeddings': env_config('DIALOG_EMBEDDINGS', default=True, cast=bool),
                        'single_input': env_config('SINGLE_INPUT', default=False, cast=bool),
-                       'use_start_end': env_config('USE_START_END', default=True, cast=bool)})
+                       'use_start_end': env_config('USE_START_END', default=False, cast=bool)})
     if config.annealing_topk == 'None':
         config.annealing_topk = None
     if config.annealing_topk is not None:
@@ -78,7 +78,7 @@ def get_trainer_config():
                        'limit_eval_size': env_config('LIMIT_EVAL_TIME', default=-1, cast=int),
                        'limit_train_size': env_config('LIMIT_TRAIN_TIME', default=-1, cast=int),
                        'risk_metric': env_config('RISK_METRIC', default='f1', cast=str),
-                       'load_last': '', #./checkpoints/last_checkpoint',  # Now that we save several experiments you can put the path of the checpoint file you want to load here
+                       'load_last': env_config('LOAD_LAST', default='', cast=str), #./checkpoints/last_checkpoint',  # Now that we save several experiments you can put the path of the checpoint file you want to load here
                        'repo_id': str(repo),
                        'repo_sha': str(repo.head.object.hexsha),
                        'repo_branch': str(repo.active_branch),
