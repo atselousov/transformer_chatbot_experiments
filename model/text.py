@@ -30,7 +30,6 @@ class SpacyLowerTokenizer:
 
         return words
 
-
 class BPEVocab:
     we = '</w>'
 
@@ -70,11 +69,27 @@ class BPEVocab:
 
         return set(zip(string[:-1], string[1:]))
 
-    def __init__(self, vocab, codes, tokenizer=SpacyLowerTokenizer()):
-        #TODO: add check for special tokens
-        self.spec_tokens = [BPEVocab.pad_token, BPEVocab.bos_token, BPEVocab.eos_token,
-                            BPEVocab.info_bos, BPEVocab.info_eos, BPEVocab.talker1_bos,
-                            BPEVocab.talker1_eos, BPEVocab.talker2_bos, BPEVocab.talker2_eos]
+    def __init__(self, vocab, codes, tokenizer=SpacyLowerTokenizer(), zero_shot=False):
+        if zero_shot: # only one additional token: BPEVocab.pad_token = <pad>
+            self.spec_tokens = [BPEVocab.pad_token]
+            self.bos_token = '"</w>'
+            self.eos_token = '"</w>' # Maybe we should put several tokens here: like '"' + '\n' ?
+            self.info_bos = '\n</w>' # Maybe we should put nothing here ?
+            self.info_eos = '\n</w>'
+            self.talker1_bos = '"</w>'
+            self.talker1_eos = '"</w>'
+            self.talker2_bos = '"</w>'
+            self.talker2_eos = '"</w>'
+            self.sent_dialog_token = '"</w>'
+            self.info_dialog_token = '\n</w>'
+            self.talker1_dialog_token = '"</w>'
+            self.talker2_dialog_token = '"</w>'
+        else:
+            #TODO: add check for special tokens
+            self.spec_tokens = [BPEVocab.pad_token, BPEVocab.bos_token, BPEVocab.eos_token,
+                                BPEVocab.info_bos, BPEVocab.info_eos, BPEVocab.talker1_bos,
+                                BPEVocab.talker1_eos, BPEVocab.talker2_bos, BPEVocab.talker2_eos]
+
         vocab = self.spec_tokens + vocab
 
         self.token2id = {t: i for i, t in enumerate(vocab)}

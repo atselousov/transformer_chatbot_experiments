@@ -68,6 +68,7 @@ def get_trainer_config():
                        'test_period': 1,
                        'seed': 0,
                        'device': 'cuda',
+                       'zero_shot': env_config('ZERO_SHOT', default=False, cast=bool),
                        'persona_augment': env_config('PERSONA_AUGMENT', default=False, cast=bool),
                        'persona_aug_syn_proba': env_config('PERSONA_AUG_SYN_PROBA', default=0.0, cast=float),
                        'fp16': env_config('FP16', default=False, cast=bool),
