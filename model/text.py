@@ -72,14 +72,14 @@ class BPEVocab:
     def __init__(self, vocab, codes, tokenizer=SpacyLowerTokenizer(), zero_shot=False):
         if zero_shot: # only one additional token: BPEVocab.pad_token = <pad>
             self.spec_tokens = [BPEVocab.pad_token]
-            self.bos_token = '"</w>'
+            self.bos_token = '"</w>' # Maybe we should put several tokens here: like '-' + '"' ?
             self.eos_token = '"</w>' # Maybe we should put several tokens here: like '"' + '\n' ?
             self.info_bos = '\n</w>' # Maybe we should put nothing here ?
             self.info_eos = '\n</w>'
-            self.talker1_bos = '"</w>'
-            self.talker1_eos = '"</w>'
-            self.talker2_bos = '"</w>'
-            self.talker2_eos = '"</w>'
+            self.talker1_bos = '"</w>' # same questions
+            self.talker1_eos = '"</w>' # Here also, maybe we should put several tokens here: like '"' + '\n' ?
+            self.talker2_bos = '"</w>' # same questions
+            self.talker2_eos = '"</w>' # same questions
             self.sent_dialog_token = '"</w>'
             self.info_dialog_token = '\n</w>'
             self.talker1_dialog_token = '"</w>'
