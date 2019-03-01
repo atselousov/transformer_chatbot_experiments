@@ -277,7 +277,7 @@ class Trainer:
                 self.optimizer.zero_grad()
 
                 # logging
-                global_step = (epoch * len(self.train_dataloader) + (i + 1)) // self.batch_split
+                global_step = max(((epoch + 1) * len(self.train_dataloader) + (i + 1)) // self.batch_split, 0)
                 self.writer.add_scalar("training/lm_loss", lm_loss, global_step=global_step)
                 self.writer.add_scalar("training/risk_loss", risk_loss, global_step=global_step)
                 self.writer.add_scalar("training/hits_loss", hits_loss, global_step=global_step)
