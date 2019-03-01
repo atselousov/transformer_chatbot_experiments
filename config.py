@@ -100,6 +100,7 @@ def get_trainer_config():
     local_config.n_jobs = 0
     local_config.device = 'cpu'
     local_config.risk_weight = 1
+    local_config.zero_shot = True
     local_config.fp16 = False
     local_config.train_datasets_cache = './datasets/train_datasets_cache.bin'
     local_config.test_datasets_cache = './datasets/test_datasets_cache.bin'
