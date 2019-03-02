@@ -97,7 +97,8 @@ class TransformerAgent(Agent):
                                           annealing_topk=self.opt['annealing_topk'],
                                           annealing=self.opt['annealing'],
                                           diversity_coef=self.opt['diversity_coef'],
-                                          diversity_groups=self.opt['diversity_groups'])
+                                          diversity_groups=self.opt['diversity_groups'],
+                                          sent_dialog_id=self.vocab.sent_dialog_id) # TODO
 
             state_dict = torch.load(model_config.checkpoint_path, map_location=lambda storage, loc: storage)
             if 'model' in state_dict:

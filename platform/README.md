@@ -5,22 +5,22 @@ bash inference.sh
 Register the bot
 ```bash
 # TODO remove from history (Rauf 22.02.2019)
-export MONGO_URI="mongodb+srv://<login>:<password>@cluster0-tgclb.mongodb.net/convai2"
+export MONGO_URI="mongodb+srv://admin:admin@cluster0-tgclb.mongodb.net/convai"
 
-python system_monitor.py register-bot <bot_id> <telegram_bot_name>
+python convai_router_bot/system_monitor.py register-bot <bot_id> <telegram_bot_name>
 ```
 
 Prepare router configuration
 ```bash
-cat platfrom/bot_server_config.yml convai_router_bot/config.yml
+cat platform/bot_server_config.yml > convai_router_bot/config.yml
 ``` 
-In `config.yml` replace job_id in `webhook` with your current job_id
+In `convai_router_bot/config.yml` replace job_id in `webhook` with your current job_id
 Make sure `.git` folder is present it you are using remote 
 deployment instead of `git clone` 
 
 Run router app in tmux sessin
 ```bash
-python application.py --port 8080
+python convai_router_bot/application.py --port 8080
 ```
 
 Get web hook
@@ -36,7 +36,7 @@ https://api.telegram.org/bot779933153:AAFi593HhCA_LlvOdFKU20yxJJ-Lq7X2FOw/getWeb
 (Optional) Connect to db
 
 ```bash
-mongo "mongodb+srv://cluster0-tgclb.mongodb.net/test" --username admin
+mongo "mongodb+srv://cluster0-tgclb.mongodb.net/convai" --username admin
 ```
 
 Run the agent in another tmux session
