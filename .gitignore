@@ -11,3 +11,4 @@ metrics/3rdparty/meteor-*
 temp
 __pycache__
 runs/*
+compare-mt
