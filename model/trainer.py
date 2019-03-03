@@ -196,6 +196,9 @@ class Trainer:
 
             # s2s loss on targets
             nexts = targets[:, 1:].contiguous() if targets.dim() == 2 else targets[:, 1:, 0].contiguous()
+            if self.single_input:  # no loss on contexts
+                for i, context in enumerate(contexts):
+                    nexts[i, :context.shape[1]] = self.model.padding_idx
             if self.hits_weight > 0 and negative_samples > 0:
                 # Keep the hidden states for hits@1 loss
                 hidden_state, padding_mask, _ = self.model.transformer_module(targets, enc_contexts)
@@ -316,6 +319,9 @@ class Trainer:
 
                 # s2s loss on targets
                 nexts = targets[:, 1:].contiguous() if targets.dim() == 2 else targets[:, 1:, 0].contiguous()
+                if self.single_input:  # no loss on contexts
+                    for i, context in enumerate(contexts):
+                        nexts[i, :context.shape[1]] = self.model.padding_idx
                 if negative_samples > 0:
                     # Keep the hidden states for hits@1 loss
                     hidden_state, padding_mask, _ = self.model.transformer_module(targets, enc_contexts)
