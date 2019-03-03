@@ -35,7 +35,6 @@ def main():
                         datefmt = '%m/%d/%Y %H:%M:%S',
                         level = logging.INFO if args.local_rank in [-1, 0] else logging.ERROR)
     logger = logging.getLogger(__file__)
-
     if args.server_ip and args.server_port and args.local_rank in [-1, 0]:
         # Distant debugging - see https://code.visualstudio.com/docs/python/debugging#_attach-to-a-local-script
         import ptvsd
@@ -43,19 +42,18 @@ def main():
         ptvsd.enable_attach(address=(args.server_ip, args.server_port), redirect_output=True)
         ptvsd.wait_for_attach()
 
+    model_config = get_model_config()
+    trainer_config = get_trainer_config()
+
     # Log only on main process
     if args.local_rank not in [-1, 0]:
         sys.stdout = open(f"./runs/log_distributed_{args.local_rank}", "w")  # dump sdtout
         writer = DummyWriter()
     else:
-        writer = SummaryWriter()
-
-    model_config = get_model_config()
-    trainer_config = get_trainer_config()
+        writer = SummaryWriter(comment=trainer_config.writer_comment)
 
     logger.info("model config: {}".format(model_config))
     logger.info("trainer config: {}".format(trainer_config))
-
     log_dir = writer.log_dir
     interrupt_checkpoint_path = os.path.join(log_dir, trainer_config.interrupt_checkpoint_path)
     last_checkpoint_path = os.path.join(log_dir, trainer_config.last_checkpoint_path)
@@ -69,7 +67,7 @@ def main():
     set_seed(trainer_config.seed)
     device = torch.device(trainer_config.device)
 
-    vocab = BPEVocab.from_files(model_config.bpe_vocab_path, model_config.bpe_codes_path)
+    vocab = BPEVocab.from_files(model_config.bpe_vocab_path, model_config.bpe_codes_path, zero_shot=trainer_config.zero_shot)
 
     transformer = TransformerModel(n_layers=model_config.n_layers,
                                    n_embeddings=len(vocab),
@@ -94,36 +92,46 @@ def main():
                                    diversity_coef=model_config.diversity_coef,
                                    diversity_groups=model_config.diversity_groups,
                                    multiple_choice_head=model_config.multiple_choice_head,
-                                   single_input=trainer_config.single_input,
-                                   dialog_embeddings=trainer_config.dialog_embeddings,
+                                   constant_embedding=model_config.constant_embedding,
+                                   single_input=model_config.single_input,
+                                   dialog_embeddings=model_config.dialog_embeddings,
+                                   share_models=model_config.share_models,
+                                   successive_attention=model_config.successive_attention,
+                                   sparse_embeddings=model_config.sparse_embeddings,
+                                   shared_attention=model_config.shared_attention,
                                    vocab=None)  # for beam search debugging
 
     if not trainer_config.load_last:
         load_openai_weights(transformer.transformer_module, 
                             trainer_config.openai_parameters_dir,
                             n_special_tokens=vocab.n_special_tokens)
-        logger.info('OpenAI weights loaded from {}'.format(trainer_config.openai_parameters_dir))
+        if not model_config.share_models:
+            load_openai_weights(transformer.encoder_module, 
+                                trainer_config.openai_parameters_dir,
+                                n_special_tokens=vocab.n_special_tokens)
+        logger.info('OpenAI weights loaded from {}, model shared: {}'.format(
+                        trainer_config.openai_parameters_dir, model_config.share_models))
 
     logger.info('loading datasets')
     train_dataset = FacebookDataset(trainer_config.train_datasets, vocab,
-                                    max_lengths=(transformer.n_pos_embeddings - 1) // (3 if trainer_config.single_input else 1),  # A bit restrictive here
-                                    dialog_embeddings=trainer_config.dialog_embeddings,
+                                    max_lengths=(transformer.n_pos_embeddings - 1) // (3 if model_config.single_input else 1),  # A bit restrictive here
+                                    dialog_embeddings=model_config.dialog_embeddings,
                                     cache=trainer_config.train_datasets_cache,
-                                    use_start_end=trainer_config.use_start_end,
+                                    use_start_end=model_config.use_start_end,
                                     negative_samples=trainer_config.negative_samples,
                                     augment=trainer_config.persona_augment,
                                     aug_syn_proba=trainer_config.persona_aug_syn_proba,
                                     limit_size=trainer_config.limit_train_size)
     test_dataset = FacebookDataset(trainer_config.test_datasets, vocab,
-                                   max_lengths=(transformer.n_pos_embeddings - 1) // (3 if trainer_config.single_input else 1),  # A bit restrictive here
-                                   dialog_embeddings=trainer_config.dialog_embeddings,
+                                   max_lengths=(transformer.n_pos_embeddings - 1) // (3 if model_config.single_input else 1),  # A bit restrictive here
+                                   dialog_embeddings=model_config.dialog_embeddings,
                                    cache=trainer_config.test_datasets_cache,
-                                   use_start_end=trainer_config.use_start_end,
+                                   use_start_end=model_config.use_start_end,
                                    negative_samples=-1,  # Keep all negative samples
                                    augment=False,
                                    aug_syn_proba=0.0,
                                    limit_size=trainer_config.limit_eval_size)
-
+    logger.info(f'train dataset {len(train_dataset)} test dataset {(test_dataset)}')
     model_trainer = Trainer(transformer,
                             train_dataset,
                             writer,
@@ -138,7 +146,7 @@ def main():
                             lm_weight=trainer_config.lm_weight,
                             risk_weight=trainer_config.risk_weight,
                             hits_weight=trainer_config.hits_weight,
-                            single_input=trainer_config.single_input,
+                            single_input=model_config.single_input,
                             n_jobs=trainer_config.n_jobs,
                             clip_grad=trainer_config.clip_grad,
                             device=device,
@@ -157,9 +165,9 @@ def main():
 
 
     # helpers -----------------------------------------------------
-    def external_metrics_func(full_references, full_predictions):
-        references_file_path = os.path.join(writer.log_dir, trainer_config.eval_references_file)
-        predictions_file_path = os.path.join(writer.log_dir, trainer_config.eval_predictions_file)
+    def external_metrics_func(full_references, full_predictions, epoch):
+        references_file_path = os.path.join(writer.log_dir, trainer_config.eval_references_file + "_{}".format(epoch))
+        predictions_file_path = os.path.join(writer.log_dir, trainer_config.eval_predictions_file + "_{}".format(epoch))
         with open(references_file_path, 'w', encoding='utf-8') as f:
             f.write(unicode('\n'.join(full_references)))
         with open(predictions_file_path, 'w', encoding='utf-8') as f:
@@ -208,11 +216,25 @@ def main():
         scores = f1_score(predictions, targets, average=False)
         return [1-s for s in scores]
 
+    def get_risk_metric_func(risk_metric):
+        """ risk_metric selected in:
+            f1, meteor, avg_len, nist_{1, 2, 3, 4}, entropy_{1, 2, 3, 4}, div_{1, 2}, bleu_{1, 2, 3, 4}
+        """
+        def external_metric_risk(predictions, targets):
+            string_targets = list(vocab.ids2string(t) for t in targets)
+            string_predictions = list(vocab.ids2string(t) for t in predictions)
+            metrics = [external_metrics_func([t], [p], epoch=-1)[risk_metric] for p, t in zip(string_predictions, string_targets)]
+            return metrics
+        if risk_metric == 'f1':
+            return f1_risk
+        return external_metric_risk
+
     # helpers -----------------------------------------------------
 
 
     try:
-        model_trainer.train(after_epoch_funcs=[save_func, sample_text_func, test_func], risk_func=f1_risk)
+        model_trainer.train(after_epoch_funcs=[save_func, sample_text_func, test_func],
+                            risk_func=get_risk_metric_func(trainer_config.risk_metric))
     except (KeyboardInterrupt, Exception, RuntimeError) as e:
         torch.save(model_trainer.state_dict(), interrupt_checkpoint_path)
         raise e

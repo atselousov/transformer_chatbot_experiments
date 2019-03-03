@@ -29,6 +29,46 @@ except ImportError:
     print("Better speed can be achieved with apex installed from https://www.github.com/nvidia/apex.")
     from torch.nn import LayerNorm
 
+
+class ConstantPositionalEmbedding(nn.Module):
+    def __init__(self, embedding_dim, padding_idx):
+        super(ConstantPositionalEmbedding, self).__init__()
+
+        self.embedding_dim = embedding_dim
+        self.padding_idx = padding_idx
+        self.register_buffer('_position_embedding',
+                             ConstantPositionalEmbedding.get_embedding(1024,
+                                                                       self.embedding_dim))
+
+    @classmethod
+    def get_embedding(cls, seq_len, embedding_dim, device=None):
+        seq_len += 1
+
+        half_dim = embedding_dim // 2
+
+        emb = math.log(10000) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, dtype=torch.float32, device=device) * -emb)
+        emb = torch.arange(seq_len, dtype=torch.float32, device=device).unsqueeze(1) * emb.unsqueeze(0)
+        emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1).view(seq_len, -1)
+
+        if embedding_dim % 2:
+            emb = torch.cat([emb, torch.zeros(seq_len, 1)], dim=1)
+
+        return emb
+
+    def forward(self, positions):
+        batch_size, seq_len = positions.size()
+
+        cur_seq_len = max(seq_len, torch.max(positions).item())
+
+        if cur_seq_len >= self._position_embedding.size(0):
+            self._position_embedding = ConstantPositionalEmbedding.get_embedding(cur_seq_len,
+                                                                                 self.embedding_dim,
+                                                                                 positions.device)
+
+        return self._position_embedding.index_select(0, positions.view(-1)).view(batch_size, seq_len, -1)
+
+
 class MultiheadAttention(nn.Module):
     @classmethod
     def _get_future_mask(cls, size, device):
@@ -156,15 +196,44 @@ class FeedForward(nn.Module):
         return x
 
 
+class GatedResidual(nn.Module):
+    """ A gated residual layer: see https://arxiv.org/abs/1810.03581
+    """
+    def __init__(self, in_features):
+        super(GatedResidual, self).__init__()
+        self.linear_input = nn.Linear(in_features, 1, bias=True)
+        self.linear_output = nn.Linear(in_features, 1, bias=True)
+        self._init_weights()
+
+    def _init_weights(self):
+        self.linear_input.weight.data.zero_()
+        self.linear_output.weight.data.zero_()
+
+        self.linear_input.bias.data[:] = 5
+        self.linear_output.bias.data[:] = 0
+
+    def forward(self, module_input, module_output):
+        gate = torch.sigmoid(self.linear_input(module_input) + self.linear_output(module_output))
+        return gate * module_output + (1 - gate) * module_input
+
+
 class TransformerBlock(nn.Module):
-    def __init__(self, n_features, n_heads, dropout, attn_dropout, ff_dropout):
+    def __init__(self, n_features, n_heads, dropout, attn_dropout, ff_dropout,
+                 successive_attention=False, shared_attention=True, context_size=0):
         super(TransformerBlock, self).__init__()
+
+        if shared_attention:
+            context_size = 0
 
         self.attn = MultiheadAttention(n_features, n_heads, attn_dropout)
         self.attn_norm = LayerNorm(n_features)
+        self.context_attns = nn.ModuleList([MultiheadAttention(n_features, n_heads, attn_dropout) for _ in range(context_size)])
         self.ff = FeedForward(n_features, 4 * n_features, ff_dropout)
         self.ff_norm = LayerNorm(n_features)
+        self.gated_res = GatedResidual(n_features) if successive_attention else None
         self.dropout = nn.Dropout(dropout)
+        self.shared_attention = shared_attention
+        self.successive_attention = successive_attention
 
     def forward(self, x, padding_mask, *contexts, layer_past=None):
         '''contexts = [(context1, padding_mask1), ...]'''
@@ -179,12 +248,25 @@ class TransformerBlock(nn.Module):
             layer_past = [None] * n_attn
         for i, attn_past_kv in zip(range(0, len(inputs), 2), layer_past):
             c, m = inputs[i], inputs[i+1].byte()
-            a, key_value, query = self.attn(x, c, c, m, attn_past_kv=attn_past_kv, attn_past_q=query)
-            save_kv.append(key_value)
-            full_attn += (a / n_attn)
 
-        full_attn = self.dropout(full_attn)
-        x = self.attn_norm(x + full_attn)
+            if self.shared_attention or i == 0:
+                attn = self.attn
+            else:
+                attn = self.context_attns[i // 2 - 1]
+
+            a, key_value, query = attn(x, c, c, m, attn_past_kv=attn_past_kv, attn_past_q=query)
+            save_kv.append(key_value)
+
+            if self.successive_attention:
+                a = self.dropout(a)
+                x = a + x if i == 0 else self.gated_res(a, x)
+            else:
+                full_attn += (a / n_attn)
+
+        if not self.successive_attention:
+            x = x + self.dropout(full_attn)
+
+        x = self.attn_norm(x)
 
         f = self.ff(x)
         f = self.dropout(f)
@@ -196,13 +278,23 @@ class TransformerBlock(nn.Module):
 class TransformerModule(nn.Module):
     def __init__(self, n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
                  padding_idx, n_heads, dropout, embed_dropout, attn_dropout, ff_dropout,
-                 normalize_embeddings, n_segments=None):
+                 normalize_embeddings, n_segments=None, constant_embedding=False,
+                 successive_attention=False, sparse_embeddings=False,
+                 shared_attention=True, context_size=0):
         super(TransformerModule, self).__init__()
 
-        self.embeddings = nn.Embedding(n_embeddings, embeddings_size, padding_idx=padding_idx)
-        self.pos_embeddings = nn.Embedding(n_pos_embeddings + 1, embeddings_size, padding_idx=0)
+        self._constant_embedding = constant_embedding
+
+        self.embeddings = nn.Embedding(n_embeddings, embeddings_size, padding_idx=padding_idx, sparse=sparse_embeddings)
+        if self._constant_embedding:
+            self.pos_embeddings = ConstantPositionalEmbedding(embeddings_size, padding_idx=0)
+        else:
+            self.pos_embeddings = nn.Embedding(n_pos_embeddings + 1, embeddings_size, padding_idx=0, sparse=sparse_embeddings)
+
         self.embed_dropout = nn.Dropout(embed_dropout)
-        self.layers = nn.ModuleList([TransformerBlock(embeddings_size, n_heads, dropout, attn_dropout, ff_dropout) for _ in range(n_layers)])
+        self.layers = nn.ModuleList([TransformerBlock(embeddings_size, n_heads, dropout, attn_dropout, ff_dropout,
+                                                      successive_attention, shared_attention, context_size)
+                                     for _ in range(n_layers)])
         self.n_segments = n_segments
         self.normalize_embeddings = normalize_embeddings
 
@@ -210,7 +302,8 @@ class TransformerModule(nn.Module):
 
     def _init_weights(self):
         nn.init.normal_(self.embeddings.weight, std=0.02)
-        nn.init.normal_(self.pos_embeddings.weight, std=0.02)
+        if isinstance(self.pos_embeddings, nn.Embedding):
+            nn.init.normal_(self.pos_embeddings.weight, std=0.02)
 
     def forward(self, x, enc_contexts=[], past=None):
         # x.dim() == 3 if we have additional dialog embeddings else x.dim() == 2
@@ -230,7 +323,8 @@ class TransformerModule(nn.Module):
             x = x.sum(dim=-2)
         if self.normalize_embeddings:
             x = x * math.sqrt(self.embeddings.embedding_dim)  # Used in pretrained last checkpoint for ConvAI2
-        x = x + self.pos_embeddings(positions)
+
+        x += self.pos_embeddings(positions)
         x = self.embed_dropout(x)
 
         enc_contexts = sum(enc_contexts, ())

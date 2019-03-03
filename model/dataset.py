@@ -173,7 +173,7 @@ class FacebookDataset(Dataset):
 
         sentences = []
         for y in (dialog[-1:] + candidates):
-            y = [self.vocab.bos_id] + y[:self.max_lengths-2] + [self.vocab.eos_id] if self.use_start_end else y[:self.max_lengths]
+            y = [self.vocab.bos_id] + y[:self.max_lengths-2] + [self.vocab.eos_id]
             if self.dialog_embeddings:
                 y = [[tok, self.vocab.sent_dialog_id] for tok in y]
             sentences.append(y)

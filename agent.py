@@ -10,7 +10,7 @@ from model.sentiment import pick_emoji, clean_emoji
 from config import get_model_config
 import random
 
-      
+
 class TransformerAgent(Agent):
     @staticmethod
     def add_cmdline_args(argparser):
@@ -60,6 +60,10 @@ class TransformerAgent(Agent):
 
         self.clean_emoji = self.opt['clean_emoji']
         self.check_grammar = self.opt['check_grammar']
+        self.dialog_embeddings = model_config.dialog_embeddings
+        self.use_start_end = model_config.use_start_end
+        self.single_input = model_config.single_input
+
         # 'max_seq_len': 128,
         # 'beam_size': 1,
         # 'diversity_coef': 0,
@@ -89,6 +93,7 @@ class TransformerAgent(Agent):
                                           ff_dropout=model_config.ff_dropout,
                                           bos_id=self.vocab.bos_id,
                                           eos_id=self.vocab.eos_id,
+                                          sent_dialog_id=self.vocab.sent_dialog_id,
                                           max_seq_len=self.opt['max_seq_len'],
                                           beam_size=self.opt['beam_size'],
                                           length_penalty=self.opt['length_penalty'],
@@ -98,7 +103,17 @@ class TransformerAgent(Agent):
                                           annealing=self.opt['annealing'],
                                           diversity_coef=self.opt['diversity_coef'],
                                           diversity_groups=self.opt['diversity_groups'],
-                                          sent_dialog_id=self.vocab.sent_dialog_id) # TODO
+                                          normalize_embeddings=model_config.normalize_embeddings,
+                                          multiple_choice_head=model_config.multiple_choice_head,
+                                          constant_embedding=model_config.constant_embedding,
+                                          vocab=self.vocab,
+                                          single_input=model_config.single_input,
+                                          dialog_embeddings=model_config.dialog_embeddings,
+                                          share_models=model_config.share_models,
+                                          successive_attention=model_config.successive_attention,
+                                          sparse_embeddings=model_config.sparse_embeddings,
+                                          shared_attention=model_config.sparse_embeddings
+                                          )
 
             state_dict = torch.load(model_config.checkpoint_path, map_location=lambda storage, loc: storage)
             if 'model' in state_dict:
@@ -143,6 +158,34 @@ class TransformerAgent(Agent):
 
         return persona_info, dialog
 
+    def _process_info(self, info):
+        info = self._add_start_end(info[:self.model.n_pos_embeddings - (2 if self.use_start_end else 0)],
+                                   self.vocab.info_bos_id,
+                                   self.vocab.info_eos_id)
+        info = self._add_dialog_embeddings(info, self.vocab.info_dialog_id)
+
+        return info
+
+    def _process_1st_replica(self, replica):
+        replica = self._add_start_end(replica, self.vocab.talker1_bos_id, self.vocab.talker1_eos_id)
+        replica = self._add_dialog_embeddings(replica, self.vocab.talker1_dialog_id)
+        return replica
+
+    def _process_2nd_replica(self, replica):
+        replica = self._add_start_end(replica, self.vocab.talker2_bos_id, self.vocab.talker2_eos_id)
+        replica = self._add_dialog_embeddings(replica, self.vocab.talker2_dialog_id)
+        return replica
+
+    def _add_dialog_embeddings(self, toks, dialog_tok):
+        if self.dialog_embeddings:
+            toks = [[t, dialog_tok] for t in toks]
+        return toks
+
+    def _add_start_end(self, toks, start, end):
+        if self.use_start_end:
+            toks = [start] + toks + [end]
+        return toks
+
     def observe(self, observation):
         if self.episode_done:
             self.reset()
@@ -152,16 +195,14 @@ class TransformerAgent(Agent):
             info, dialog = self._parse(text)
 
             info = sum([self.vocab.string2ids(i) for i in info], [])
-            self.history['info'].extend(info)
+            if info:
+                prev_info = [h[0] for h in self.history['info']] if self.dialog_embeddings else self.history['info']
+                self.history['info'] = self._process_info(prev_info[1:-1] + info)
 
-            for i, d in enumerate(dialog, 1):
-                d = self.vocab.string2ids(d)
-                if i % 2 == 1:
-                    d = [self.vocab.talker1_bos_id] + d + [self.vocab.talker1_eos_id]
-                else:
-                    d = [self.vocab.talker2_bos_id] + d + [self.vocab.talker2_eos_id]
-
-                self.history['dialog'].extend(d)
+            for i, replica in enumerate(dialog, 1):
+                replica = self.vocab.string2ids(replica)
+                replica = self._process_1st_replica(replica) if i % 2 == 1 else self._process_2nd_replica(replica)
+                self.history['dialog'].extend(replica)
 
         observation['agent'] = self        
 
@@ -179,7 +220,11 @@ class TransformerAgent(Agent):
 
         def to_tensor(string):
             ids = [self.vocab.bos_id] + self.vocab.string2ids(string) + [self.vocab.eos_id]
+            ids = self._add_dialog_embeddings(ids, self.vocab.sent_dialog_id)
             return torch.tensor(ids, dtype=torch.long)
+
+        def to_cuda(data_list):
+            return list(map(lambda x: x.cuda(), data_list)) if self.use_cuda else data_list
 
         batch_reply = [{'id': self.getID(), 'text': '', 'text_candidates': []} for _ in range(len(observations))]
         valid_ids = [i for i, obs in enumerate(observations) if is_valid_history(obs['agent'].history)]
@@ -191,36 +236,43 @@ class TransformerAgent(Agent):
         try:
             valid_observations = [observations[i] for i in valid_ids]
 
-            infos = [obs['agent'].history['info'][:self.model.n_pos_embeddings-3] for obs in valid_observations]
-            infos = [([self.vocab.info_bos_id] + ifo + [self.vocab.info_eos_id] if len(ifo) else ifo) for ifo in infos]
+            infos = [obs['agent'].history['info'] for obs in valid_observations]
             dialogs = [list(obs['agent'].history['dialog'])[-self.model.n_pos_embeddings+1:] for obs in valid_observations]
             contexts = []
 
             if max(map(len, infos)) > 0:
                 infos = [torch.tensor(i, dtype=torch.long) for i in infos]
-                infos = pad_sequence(infos, batch_first=True, padding_value=self.model.padding_idx)
-                if self.use_cuda:
-                    infos = infos.cuda()
                 contexts.append(infos)
 
             if max(map(len, dialogs)) > 0:
                 dialogs = [torch.tensor(d, dtype=torch.long) for d in dialogs]
-                dialogs = pad_sequence(dialogs, batch_first=True, padding_value=self.model.padding_idx)
-                if self.use_cuda:
-                    dialogs = dialogs.cuda()
                 contexts.append(dialogs)
 
-            enc_contexts = [self.model.encode(c) for c in contexts]
-            pred_texts = self.model.beam_search(enc_contexts)
+            if self.single_input:
+                contexts = [torch.cat(c, dim=0).unsqueeze(0) for c in zip(*contexts)]
+            else:
+                contexts = map(lambda x: pad_sequence(x, batch_first=True, padding_value=self.model.padding_idx),
+                               contexts)
+
+            contexts = to_cuda(contexts)
+
+            # because of different lens of context when single_input == True
+            pred_texts = [self.model.predict(c)[0] for c in contexts] if self.single_input \
+                          else self.model.predict(contexts)
 
             for i in range(batch_size):
-                valid_observations[i]['agent'].history['dialog'].extend([self.vocab.talker2_bos_id] +
-                                                                        pred_texts[i] +
-                                                                        [self.vocab.talker2_eos_id])
+                pred_toks = self._process_2nd_replica(pred_texts[i])
+                valid_observations[i]['agent'].history['dialog'].extend(pred_toks)
                 batch_reply[valid_ids[i]]['text'] = self.vocab.ids2string(pred_texts[i])
                 batch_reply[valid_ids[i]]['episode_done'] = valid_observations[i]['agent'].episode_done
 
             if self.opt['rank_candidates']:
+                if self.single_input:
+                    enc_contexts = []
+                    contexts = list(map(lambda x: x.squeeze(0), contexts))
+                else:
+                    enc_contexts = [self.model.encode(c) for c in contexts]
+
                 candidates = [list(obs.get('label_candidates', [])) for obs in valid_observations]
                 lens_candidates = [len(c) for c in candidates]
 
@@ -230,13 +282,28 @@ class TransformerAgent(Agent):
 
                     for i in range(max(lens_candidates)):
                         current_cands = [to_tensor(c[i])[:self.model.n_pos_embeddings-1] for c in candidates]
-                        current_cands = pad_sequence(current_cands, batch_first=True, padding_value=self.model.padding_idx)
-                        if self.use_cuda:
-                            current_cands = current_cands.cuda()
+                        current_cands = to_cuda(current_cands)
 
+                        if self.single_input:
+                            lens = map(lambda x: x.size(0), current_cands)
+                            current_cands = [torch.cat(c, dim=0)[:self.model.n_pos_embeddings-1] for c in
+                                             zip(contexts, current_cands)]
+
+                        current_cands = pad_sequence(current_cands, batch_first=True,
+                                                     padding_value=self.model.padding_idx)
                         logits = self.model.decode(current_cands[:, :-1], enc_contexts)
+
+                        if current_cands.dim() == 3:
+                            current_cands = current_cands[:, :, 0]
+
                         log_probas = F.log_softmax(logits, dim=-1)
                         log_probas = torch.gather(log_probas, -1, current_cands[:, 1:].unsqueeze(-1)).squeeze(-1)
+
+                        if self.single_input:
+                            # zero context
+                            for j, l in enumerate(lens):
+                                current_cands[j, :-l+1] = self.model.padding_idx
+
                         log_probas.masked_fill_(current_cands[:, 1:].eq(self.model.padding_idx), 0)
 
                         current_lens = current_cands[:, 1:].ne(self.model.padding_idx).float().sum(dim=-1)

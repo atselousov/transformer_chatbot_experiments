@@ -20,9 +20,11 @@ import sys
 import io
 import json
 import random
+import copy
 from collections import namedtuple, Counter
 
 import torch
+import torch.nn as nn
 import numpy as np
 from scipy.interpolate import RectBivariateSpline
 from torch.utils.checkpoint import checkpoint
@@ -152,20 +154,20 @@ def load_openai_weights(model, directory, n_special_tokens=0):
 
     parameters_weights[1] = parameters_weights[1][1:] # skip 0 - <unk> 
 
+    if isinstance(model.pos_embeddings, nn.Embedding):
+        if model.pos_embeddings.num_embeddings - 1 > parameters_weights[0].shape[0]:
+            xx = np.linspace(0, parameters_weights[0].shape[0], model.pos_embeddings.num_embeddings - 1)
+            new_kernel = RectBivariateSpline(np.arange(parameters_weights[0].shape[0]),
+                                             np.arange(parameters_weights[0].shape[1]),
+                                             parameters_weights[0])
+            parameters_weights[0] = new_kernel(xx, np.arange(parameters_weights[0].shape[1]))
 
-    if model.pos_embeddings.num_embeddings - 1 > parameters_weights[0].shape[0]:
-        xx = np.linspace(0, parameters_weights[0].shape[0], model.pos_embeddings.num_embeddings - 1)
-        new_kernel = RectBivariateSpline(np.arange(parameters_weights[0].shape[0]),
-                                         np.arange(parameters_weights[0].shape[1]), 
-                                         parameters_weights[0])
-        parameters_weights[0] = new_kernel(xx, np.arange(parameters_weights[0].shape[1]))
+        parameters_weights[0] = parameters_weights[0][:model.pos_embeddings.num_embeddings - 1]
+        model.pos_embeddings.weight.data[1:] = torch.from_numpy(parameters_weights[0])
 
-    parameters_weights[0] = parameters_weights[0][:model.pos_embeddings.num_embeddings - 1]
     parameters_weights[1] = parameters_weights[1][:model.embeddings.num_embeddings - n_special_tokens]
-
-    model.pos_embeddings.weight.data[1:] = torch.from_numpy(parameters_weights[0])
+    model.embeddings.weight.data[:n_special_tokens] = 0
     model.embeddings.weight.data[n_special_tokens:] = torch.from_numpy(parameters_weights[1])
-
 
     parameters_weights = parameters_weights[2:]
 
@@ -192,3 +194,9 @@ def load_openai_weights(model, directory, n_special_tokens=0):
             weights = weights[0].transpose((1, 0))
 
         pointer.data[...] = torch.from_numpy(weights)
+
+        # Initialize shared attention layer is necessary
+        for layer in model.layers:
+            attn_state = layer.attn.state_dict()
+            for context_attn in layer.context_attns:
+                context_attn.load_state_dict(copy.deepcopy(attn_state))
