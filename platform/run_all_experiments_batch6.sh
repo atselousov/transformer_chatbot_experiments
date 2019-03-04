@@ -4,8 +4,8 @@ CPU=6
 GPU=1
 MEM=24G
 
-IMAGE="truskovskyi/transformer_chatbot:6e1d85951e89cd7bb51612d59dff1010a27b212c"
-https://circleci.com/gh/atselousov/transformer_chatbot_experiments/193?utm_campaign=vcs-integration-link&utm_medium=referral&utm_source=github-build-link
+IMAGE="truskovskyi/transformer_chatbot:cd29180e6b5431a02e4c2c9844014552cd4cc0ec"
+https://circleci.com/gh/atselousov/transformer_chatbot_experiments/195?utm_campaign=vcs-integration-link&utm_medium=referral&utm_source=github-build-link
 DATA_ROOT="storage://truskovskiyk/convai"
 
 CMD="python train.py"
