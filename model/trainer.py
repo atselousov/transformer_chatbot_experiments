@@ -351,7 +351,7 @@ class Trainer:
                             predictions.append(beam_outputs)
                         predictions = sum(predictions, [])
                     else:
-                        predictions = self.model.beam_search(enc_contexts=enc_contexts, beam_starts=torch.cat(contexts, dim=1) if self.single_input else None)
+                        predictions = self.model.beam_search(enc_contexts=enc_contexts, beam_starts=None)
                     labels = targets if targets.dim() == 2 else targets[:, :, 0]
                     labels_lens = labels.ne(self.model.padding_idx).sum(dim=-1)
                     labels_start = [context.shape[1] + 1 for context in contexts] if self.single_input else [1] * len(targets)
@@ -361,7 +361,7 @@ class Trainer:
                         score = func(predictions, labels)
                         metrics[name] = (metrics[name] * i + score) / (i + 1)
 
-                    if external_metrics_func:
+                    if external_metrics_func and len(labels) == len(predictions):
                         # Store text strings for external metrics
                         string_targets = list(self.vocab.ids2string(t) for t in labels)
                         string_predictions = list(self.vocab.ids2string(t) for t in predictions)
