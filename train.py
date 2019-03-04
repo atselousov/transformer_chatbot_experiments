@@ -169,9 +169,9 @@ def main():
         references_file_path = os.path.join(writer.log_dir, trainer_config.eval_references_file + "_{}".format(epoch))
         predictions_file_path = os.path.join(writer.log_dir, trainer_config.eval_predictions_file + "_{}".format(epoch))
         with open(references_file_path, 'w', encoding='utf-8') as f:
-            f.write(unicode('\n'.join(full_references)))
+            f.write(unicode('\n'.join(full_references[:-1])))  # strip the last line to fix mysterious bug  TODO: investigate
         with open(predictions_file_path, 'w', encoding='utf-8') as f:
-            f.write(unicode('\n'.join(full_predictions)))
+            f.write(unicode('\n'.join(full_predictions[:-1])))  # strip the last line to fix mysterious bug  TODO: investigate
 
         nist, bleu, meteor, entropy, div, avg_len = nlp_metrics([references_file_path], predictions_file_path)
 
