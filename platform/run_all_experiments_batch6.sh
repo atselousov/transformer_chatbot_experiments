@@ -10,7 +10,7 @@ DATA_ROOT="storage://truskovskiyk/convai"
 
 CMD="python train.py"
 
-non_preemptible_v100=(origin_single_1_epochs_full_embed origin_single_4_epochs_full_embed origin_single_4_epochs_high_s2s_coef origin_single_4_epochs_no_dialog_embed)
+non_preemptible_v100=(origin_single_1_epochs_full_embed origin_single_4_epochs_full_embed origin_single_4_epochs_high_s2s_coef origin_single_10_epochs_full_embed)
 
 for experiment_name in "${non_preemptible_v100[@]}"
 do
@@ -30,7 +30,7 @@ do
         ${CMD}
 done
 
-non_preemptible_k80=(origin_single_4_epochs_no_start_end origin_single_10_epochs_full_embed origin_zero_shot_4_epochs origin_zero_shot_10_epochs)
+non_preemptible_k80=(origin_single_4_epochs_no_start_end origin_single_4_epochs_no_dialog_embed origin_zero_shot_4_epochs origin_zero_shot_10_epochs)
 
 for experiment_name in "${non_preemptible_k80[@]}"
 do
