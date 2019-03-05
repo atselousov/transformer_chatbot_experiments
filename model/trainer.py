@@ -122,14 +122,17 @@ class Trainer:
         self.n_epochs = n_epochs
         self.single_input = single_input
         self.evaluate_full_sequences = evaluate_full_sequences
+        self.global_step = 0
 
     def state_dict(self):
         return {'model': self.model.state_dict(),
-                'optimizer': self.optimizer.state_dict()}
+                'optimizer': self.optimizer.state_dict(),
+                'global_step': self.global_step}
 
     def load_state_dict(self, state_dict):
         self.model.load_state_dict(state_dict['model'], strict=False)
         self.optimizer.load_state_dict(state_dict['optimizer'])
+        self.global_step = state_dict['global_step']
 
     def collate_func(self, data):
         persona_info, h, y, distractors_batch = zip(*data)
@@ -153,7 +156,7 @@ class Trainer:
             y_out = [torch.cat(pieces, dim=0) for pieces in zip(*(contexts + [y_out]))]
             extended_contexts = [[t for t in c for _ in range(len(distractors)//len(y))] for c in contexts]
             distractors = [torch.cat(pieces, dim=0) for pieces in zip(*(extended_contexts + [distractors]))]
-            contexts = [torch.cat(pieces, dim=0) for pieces in zip(*(contexts))]
+            contexts = [torch.cat(pieces, dim=0) for pieces in zip(*contexts)]
 
         # Pad now so we pad correctly when we have only a single input (context concatenated with y)
         y_out = pad_sequence(y_out, batch_first=True, padding_value=self.model.padding_idx)
@@ -223,10 +226,8 @@ class Trainer:
                     beams, beam_lens = [], []
                     for b in range(targets.shape[0]):
                         beam_outputs = self.model.beam_search(beam_starts=contexts[b], return_beams=True)
-                        beams.append(beam_outputs[0])
-                        beam_lens.append(beam_outputs[1])
-                    beams = torch.cat(beams, dim=0)
-                    beam_lens = torch.cat(beam_lens, dim=0)
+                        beams.append(beam_outputs[0].squeeze(0))
+                        beam_lens.append(beam_outputs[1].squeeze(0))
                 else:
                     beams, beam_lens = self.model.beam_search(enc_contexts=enc_contexts, return_beams=True)
                 self.model.train()  # re-activate dropout
@@ -236,17 +237,30 @@ class Trainer:
                 labels_start = [context.shape[1] + 1 for context in contexts] if self.single_input else [1] * len(labels)
                 labels = [t[s:l-1].tolist() for t, s, l in zip(labels, labels_start, labels_lens)]
                 batch_risks = []
-                for b in range(beams.shape[1]):
-                    predictions = [b[1:l-1].tolist() for b, l in zip(beams[:, b, :], beam_lens[:, b])]
+                for b in range(self.model.beam_size):
+                    predictions = [t[b][1:l[b]-1].tolist() for t, l in zip(beams, beam_lens)]
                     risks = torch.tensor(risk_func(predictions, labels), dtype=torch.float, device=self.device)
                     batch_risks.append(risks)
                 batch_risks = torch.stack(batch_risks, dim=-1)
 
+                if self.single_input:
+                    beams = [torch.cat([context.repeat(beam.shape[0], 1), beam], dim=1) for beam, context in zip(beams, contexts)]
+                    beam_lens = [beam_len + context.shape[1] for beam_len, context in zip(beam_lens, contexts)]
+                    beam_lens = torch.stack(beam_lens, dim=0)
+
                 batch_probas = []
-                for b in range(beams.shape[1]):
-                    logits = self.model.decode(beams[:, b, :-1], enc_contexts)
+                for b in range(self.model.beam_size):
+                    if self.single_input:
+                        current_beam = pad_sequence([beam[b][:-1] for beam in beams], batch_first=True, padding_value=self.model.padding_idx)
+                        inputs = current_beam[..., :-1]
+                        outputs = current_beam[..., 1:]
+                    else:
+                        inputs = beams[:, b, :-1]
+                        outputs = beams[:, b, 1:]
+
+                    logits = self.model.decode(inputs, enc_contexts)
                     probas = F.log_softmax(logits.float(), dim=-1)
-                    probas = torch.gather(probas, -1, beams[:, b, 1:].unsqueeze(-1)).squeeze(-1)
+                    probas = torch.gather(probas, -1, outputs.unsqueeze(-1)).squeeze(-1)
                     probas = probas.sum(dim=-1) / beam_lens[:, b].float()
                     batch_probas.append(probas)
                 batch_probas = torch.stack(batch_probas, dim=-1)
@@ -258,8 +272,8 @@ class Trainer:
             full_loss = (self.lm_weight * batch_lm_loss
                          + self.risk_weight * batch_risk_loss
                          + self.hits_weight * batch_hits_loss
-                         + self.s2s_weight * batch_s2s_loss) / self.batch_split
-            self.optimizer.backward(full_loss)
+                         + self.s2s_weight * batch_s2s_loss)
+            self.optimizer.backward(full_loss / self.batch_split)
 
             lm_loss = (i * lm_loss + batch_lm_loss.item()) / (i + 1)
             s2s_loss = (i * s2s_loss + batch_s2s_loss.item()) / (i + 1)
@@ -276,14 +290,15 @@ class Trainer:
                 self.optimizer.step()
                 self.optimizer.zero_grad()
 
-                # logging
-                global_step = max(((epoch + 1) * len(self.train_dataloader) + (i + 1)) // self.batch_split, 0)
+                global_step = max(self.global_step, 0)
                 self.writer.add_scalar("training/lm_loss", lm_loss, global_step=global_step)
                 self.writer.add_scalar("training/risk_loss", risk_loss, global_step=global_step)
                 self.writer.add_scalar("training/hits_loss", hits_loss, global_step=global_step)
                 self.writer.add_scalar("training/s2s_loss", s2s_loss, global_step=global_step)
                 self.writer.add_scalar("training/full_loss", full_loss, global_step=global_step)
                 self.writer.add_scalar("training/lr", self.optimizer.get_lr(), global_step=global_step)
+
+                self.global_step += 1
 
 
     def _eval_test(self, metric_funcs={}, external_metrics_func=None, epoch=-1):
@@ -371,7 +386,7 @@ class Trainer:
                 metrics.update(external_metrics)
 
             # logging
-            global_step = max((epoch + 1) * len(self.train_dataloader) // self.batch_split, 0)
+            global_step = max(self.global_step, 0)
             for key, value in metrics.items():
                 self.writer.add_scalar("eval/{}".format(key), value, global_step=global_step)
             logger.info(metrics)
@@ -381,11 +396,11 @@ class Trainer:
             self._eval_test(metric_funcs, external_metrics_func, epoch)
 
     def train(self, after_epoch_funcs=[], risk_func=None):
-        for func in after_epoch_funcs:
-            func(-1)
-
         for epoch in range(self.n_epochs):
             self._eval_train(epoch, risk_func)
 
             for func in after_epoch_funcs:
                 func(epoch)
+
+        for func in after_epoch_funcs:
+            func(-1)

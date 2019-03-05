@@ -177,8 +177,9 @@ def main():
 
         metrics = {'meteor': meteor, 'avg_len': avg_len}
         for name, metric in (('nist', nist), ('entropy', entropy), ('div', div), ('bleu', bleu)):
-            for i, m in enumerate(metric):
-                metrics['{}_{}'.format(name, i+1)] = m
+            for i, m in enumerate(metric, 1):
+                metrics['{}_{}'.format(name, i)] = m
+
         return metrics
 
     def save_func(epoch):
@@ -214,7 +215,7 @@ def main():
 
     def f1_risk(predictions, targets):
         scores = f1_score(predictions, targets, average=False)
-        return [1-s for s in scores]
+        return [-s for s in scores]
 
     def get_risk_metric_func(risk_metric):
         """ risk_metric selected in:
@@ -224,7 +225,8 @@ def main():
             string_targets = list(vocab.ids2string(t) for t in targets)
             string_predictions = list(vocab.ids2string(t) for t in predictions)
             metrics = [external_metrics_func([t], [p], epoch=-1)[risk_metric] for p, t in zip(string_predictions, string_targets)]
-            return metrics
+            return [-m for m in metrics]
+
         if risk_metric == 'f1':
             return f1_risk
         return external_metric_risk

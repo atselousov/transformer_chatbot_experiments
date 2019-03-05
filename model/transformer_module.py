@@ -206,8 +206,8 @@ class GatedResidual(nn.Module):
         self._init_weights()
 
     def _init_weights(self):
-        self.linear_input.weight.data.zero_()
-        self.linear_output.weight.data.zero_()
+        nn.init.normal_(self.linear_input.weight, std=0.02)
+        nn.init.normal_(self.linear_output.weight, std=0.02)
 
         self.linear_input.bias.data[:] = 5
         self.linear_output.bias.data[:] = 0
@@ -240,12 +240,12 @@ class TransformerBlock(nn.Module):
 
         inputs = (x, padding_mask) + contexts
 
-        full_attn = 0
-        n_attn = len(inputs) // 2
+        result_attns = []
         save_kv = []
         query = None
         if layer_past is None:
-            layer_past = [None] * n_attn
+            layer_past = [None] * (len(inputs) // 2)
+
         for i, attn_past_kv in zip(range(0, len(inputs), 2), layer_past):
             c, m = inputs[i], inputs[i+1].byte()
 
@@ -256,15 +256,16 @@ class TransformerBlock(nn.Module):
 
             a, key_value, query = attn(x, c, c, m, attn_past_kv=attn_past_kv, attn_past_q=query)
             save_kv.append(key_value)
+            result_attns.append(a)
 
-            if self.successive_attention:
+        if self.successive_attention:
+            for i, a in enumerate(result_attns):
                 a = self.dropout(a)
                 x = a + x if i == 0 else self.gated_res(a, x)
-            else:
-                full_attn += (a / n_attn)
-
-        if not self.successive_attention:
-            x = x + self.dropout(full_attn)
+        else:
+            a = sum(result_attns, 0) / len(result_attns)
+            a = self.dropout(a)
+            x = x + a
 
         x = self.attn_norm(x)
 
