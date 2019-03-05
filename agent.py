@@ -257,7 +257,7 @@ class TransformerAgent(Agent):
             contexts = to_cuda(contexts)
 
             # because of different lens of context when single_input == True
-            pred_texts = [self.model.predict(c)[0] for c in contexts] if self.single_input \
+            pred_texts = [self.model.predict([c])[0] for c in contexts] if self.single_input \
                           else self.model.predict(contexts)
 
             for i in range(batch_size):
