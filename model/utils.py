@@ -37,10 +37,12 @@ else:
     unicode = str
     open = open
 
+
 def set_seed(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     random.seed(seed)
+
 
 def repeat_along_dim1(obj, repetitions):
     """ repeat (a possibly nested object of) tensors from (batch, ...) to (batch * repetitions, ...) """
@@ -48,9 +50,8 @@ def repeat_along_dim1(obj, repetitions):
         return tuple(repeat_along_dim1(o, repetitions) for o in obj)
     if isinstance(obj, list):
         return list(repeat_along_dim1(o, repetitions) for o in obj)
-    tail_dims = obj.shape[1:]
-    obj = obj.unsqueeze(1).repeat([1, repetitions] + [1] * len(tail_dims))
-    return obj.view(-1, *tail_dims)
+    return obj.repeat([repetitions] + [1] * len(obj.shape[1:]))
+
 
 def pad_sequence(sequences, batch_first=False, padding_value=0):
     # assuming trailing dimensions and type of all the Tensors
