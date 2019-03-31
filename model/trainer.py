@@ -32,9 +32,10 @@ from .utils import pad_sequence, repeat_along_dim1
 
 logger = logging.getLogger(__file__)
 
+
 class Trainer:
     def __init__(self, model, train_dataset, writer=SummaryWriter(), test_dataset=None, train_batch_size=8, test_batch_size=8,
-                 batch_split=1, s2s_weight=1, lm_weight=0.5, risk_weight=0, hits_weight=0, lr=6.25e-5, lr_warmup=2000, 
+                 batch_split=1, s2s_weight=1, lm_weight=0.5, risk_weight=0, hits_weight=0, lr=6.25e-5, lr_warmup=2000,
                  n_jobs=0, clip_grad=None, label_smoothing=0, device=torch.device('cuda'), weight_decay=0.1,
                  ignore_idxs=[], local_rank=-1, fp16=False, loss_scale=0,
                  linear_schedule=False, n_epochs=0, single_input=False, evaluate_full_sequences=False):
@@ -42,7 +43,7 @@ class Trainer:
             torch.cuda.set_device(local_rank)
             device = torch.device("cuda", local_rank)
             torch.distributed.init_process_group(backend='nccl',
-                                                init_method='env://')
+                                                 init_method='env://')
         n_gpu = torch.cuda.device_count()
         logger.info("device: {}, distributed training: {}, 16-bits training: {}, n_gpu: {}".format(
             device, bool(local_rank != -1), fp16, n_gpu))
@@ -168,6 +169,123 @@ class Trainer:
 
         return contexts, y_out, distractors
 
+    def _lm_loss(self, contexts, enc_contexts):
+        batch_lm_loss = torch.tensor(0, dtype=torch.float, device=self.device)
+
+        if self.single_input:
+            return batch_lm_loss
+
+        for context in contexts:
+            enc_context = self.model.encode(context.clone())
+            enc_contexts.append(enc_context)
+
+            if self.lm_weight > 0:
+                context_outputs = self.model.generate(enc_context[0])
+                ignore_mask = torch.stack([context == idx for idx in self.ignore_idxs], dim=-1).any(dim=-1)
+                context.masked_fill_(ignore_mask, self.model.padding_idx)
+                prevs = context_outputs[:, :-1, :].contiguous()
+                nexts = context[:, 1:].contiguous() if context.dim() == 2 else context[:, 1:, 0].contiguous()
+                batch_lm_loss += self.lm_criterion(prevs.view(-1, prevs.shape[-1]).float(), nexts.view(-1)) / len(contexts)
+        return batch_lm_loss
+
+    def _s2s_loss(self, targets, enc_contexts, negative_samples, train=True):
+        hidden_state, padding_mask = None, None
+
+        nexts = targets[:, 1:].contiguous() if targets.dim() == 2 else targets[:, 1:, 0].contiguous()
+        if self.hits_weight > 0 and negative_samples > 0:
+            # Keep the hidden states for hits@1 loss
+            hidden_state, padding_mask, _ = self.model.transformer_module(targets, enc_contexts)
+            outputs = self.model.generate(hidden_state[:, :-1].contiguous())
+        else:
+            outputs = self.model.decode(targets[:, :-1].contiguous(), enc_contexts)
+
+        if train:
+            outputs = F.log_softmax(outputs.float(), dim=-1)
+            loss = self.criterion(outputs.view(-1, outputs.shape[-1]), nexts.view(-1))
+        else:
+            loss = self.lm_criterion(outputs.view(-1, outputs.shape[-1]).float(),
+                                     nexts.view(-1))  # We evaluate with CrossEntropy
+
+        return loss, hidden_state, padding_mask
+
+    def _hist_loss(self, distractors, hidden_state, padding_mask, enc_contexts, negative_samples, train=True):
+        batch_hits_loss = torch.tensor(0, dtype=torch.float, device=self.device)
+
+        if not (self.hits_weight > 0 and negative_samples > 0 and self.model.multiple_choice_head is not None):
+            return batch_hits_loss
+
+        if self.hits_weight > 0 and negative_samples > 0 and self.model.multiple_choice_head is not None:
+            extended_contexts = repeat_along_dim1(enc_contexts, negative_samples)
+            neg_logits = self.model.decode_classify(distractors, extended_contexts)
+            true_logits = self.model.classify(hidden_state, padding_mask)
+            clf_logits = torch.cat((true_logits.view(-1, 1), neg_logits.view(-1, negative_samples)), dim=1)
+            clf_labels = torch.tensor([0] * len(true_logits), dtype=torch.long, device=self.device)
+
+            batch_hits_loss = self.hits_criterion(clf_logits.float(), clf_labels) if train else \
+                              torch.sum(torch.max(clf_logits, dim=1)[1] == clf_labels).float() / clf_labels.shape[0]
+
+        return batch_hits_loss
+
+    def _risk_loss(self, contexts, targets, enc_contexts, risk_func):
+
+        if not (risk_func is not None and self.risk_weight > 0):
+            return torch.tensor(0, dtype=torch.float, device=self.device)
+
+        assert risk_func is not None
+
+        self.model.eval()  # desactivate dropout
+
+        if self.single_input:
+            beams, beam_lens = [], []
+            for b in range(targets.shape[0]):
+                beam_outputs = self.model.beam_search(beam_starts=contexts[b], return_beams=True)
+                beams.append(beam_outputs[0].squeeze(0))
+                beam_lens.append(beam_outputs[1].squeeze(0))
+        else:
+            beams, beam_lens = self.model.beam_search(enc_contexts=enc_contexts, return_beams=True)
+        self.model.train()  # re-activate dropout
+
+        labels = targets if targets.dim() == 2 else targets[:, :, 0]
+        labels_lens = labels.ne(self.model.padding_idx).sum(dim=-1)
+        labels_start = [context.shape[1] + 1 for context in contexts] if self.single_input else [1] * len(labels)
+        labels = [t[s:l - 1].tolist() for t, s, l in zip(labels, labels_start, labels_lens)]
+
+        batch_risks = []
+        for b in range(self.model.beam_size):
+            predictions = [t[b][1:l[b] - 1].tolist() for t, l in zip(beams, beam_lens)]
+            risks = torch.tensor(risk_func(predictions, labels), dtype=torch.float, device=self.device)
+            batch_risks.append(risks)
+        batch_risks = torch.stack(batch_risks, dim=-1)
+
+        if self.single_input:
+            beams = [torch.cat([context.repeat(beam.shape[0], 1), beam], dim=1) for beam, context in
+                     zip(beams, contexts)]
+            beam_lens = [beam_len + context.shape[1] for beam_len, context in zip(beam_lens, contexts)]
+            beam_lens = torch.stack(beam_lens, dim=0)
+
+        batch_probas = []
+        for b in range(self.model.beam_size):
+            if self.single_input:
+                current_beam = pad_sequence([beam[b][:-1] for beam in beams], batch_first=True,
+                                            padding_value=self.model.padding_idx)
+                inputs = current_beam[..., :-1]
+                outputs = current_beam[..., 1:]
+            else:
+                inputs = beams[:, b, :-1]
+                outputs = beams[:, b, 1:]
+
+            logits = self.model.decode(inputs, enc_contexts)
+            probas = F.log_softmax(logits.float(), dim=-1)
+            probas = torch.gather(probas, -1, outputs.unsqueeze(-1)).squeeze(-1)
+            probas = probas.sum(dim=-1) / beam_lens[:, b].float()
+            batch_probas.append(probas)
+        batch_probas = torch.stack(batch_probas, dim=-1)
+        batch_probas = F.softmax(batch_probas, dim=-1)
+
+        batch_risk_loss = torch.mean((batch_risks * batch_probas).sum(dim=-1))
+
+        return batch_risk_loss
+
     def _eval_train(self, epoch, risk_func=None): # add ppl and hits@1 evaluations
         self.model.train()
 
@@ -183,90 +301,16 @@ class Trainer:
             enc_contexts = []
 
             # lm loss on contexts
-            batch_lm_loss = torch.tensor(0, dtype=torch.float, device=self.device)
-            if not self.single_input:
-                for context in contexts:
-                    enc_context = self.model.encode(context.clone())
-                    enc_contexts.append(enc_context)
-
-                    if self.lm_weight > 0:
-                        context_outputs = self.model.generate(enc_context[0])
-                        ignore_mask = torch.stack([context == idx for idx in self.ignore_idxs], dim=-1).any(dim=-1)
-                        context.masked_fill_(ignore_mask, self.model.padding_idx)
-                        prevs = context_outputs[:, :-1, :].contiguous()
-                        nexts = context[:, 1:].contiguous() if context.dim() == 2 else context[:, 1:, 0].contiguous()
-                        batch_lm_loss += (self.lm_criterion(prevs.view(-1, prevs.shape[-1]).float(), nexts.view(-1)) / len(contexts))
+            batch_lm_loss = self._lm_loss(contexts, enc_contexts)
 
             # s2s loss on targets
-            nexts = targets[:, 1:].contiguous() if targets.dim() == 2 else targets[:, 1:, 0].contiguous()
-            if self.hits_weight > 0 and negative_samples > 0:
-                # Keep the hidden states for hits@1 loss
-                hidden_state, padding_mask, _ = self.model.transformer_module(targets, enc_contexts)
-                outputs = self.model.generate(hidden_state[:, :-1].contiguous())
-            else:
-                outputs = self.model.decode(targets[:, :-1].contiguous(), enc_contexts)
-            outputs = F.log_softmax(outputs.float(), dim=-1)
-            batch_s2s_loss = self.criterion(outputs.view(-1, outputs.shape[-1]), nexts.view(-1))
+            batch_s2s_loss, hidden_state, padding_mask = self._s2s_loss(targets, enc_contexts, negative_samples)
 
             # hits@1 loss on distractors and targets
-            batch_hits_loss = torch.tensor(0, dtype=torch.float, device=self.device)
-            if self.hits_weight > 0 and negative_samples > 0 and self.model.multiple_choice_head is not None:
-                extended_contexts = repeat_along_dim1(enc_contexts, negative_samples)
-                neg_logits = self.model.decode_classify(distractors, extended_contexts)
-                true_logits = self.model.classify(hidden_state, padding_mask)
-                clf_logits = torch.cat((true_logits.view(-1, 1), neg_logits.view(-1, negative_samples)), dim=1)
-                clf_labels = torch.tensor([0] * len(true_logits), dtype=torch.long, device=self.device)
-                batch_hits_loss = self.hits_criterion(clf_logits.float(), clf_labels)
+            batch_hits_loss = self._hist_loss(distractors, hidden_state, padding_mask, enc_contexts, negative_samples)
 
             # risk loss
-            batch_risk_loss = torch.tensor(0, dtype=torch.float, device=self.device)
-            if risk_func is not None and self.risk_weight > 0:
-                self.model.eval()  # desactivate dropout
-                if self.single_input:
-                    beams, beam_lens = [], []
-                    for b in range(targets.shape[0]):
-                        beam_outputs = self.model.beam_search(beam_starts=contexts[b], return_beams=True)
-                        beams.append(beam_outputs[0].squeeze(0))
-                        beam_lens.append(beam_outputs[1].squeeze(0))
-                else:
-                    beams, beam_lens = self.model.beam_search(enc_contexts=enc_contexts, return_beams=True)
-                self.model.train()  # re-activate dropout
-
-                labels = targets if targets.dim() == 2 else targets[:, :, 0]
-                labels_lens = labels.ne(self.model.padding_idx).sum(dim=-1)
-                labels_start = [context.shape[1] + 1 for context in contexts] if self.single_input else [1] * len(labels)
-                labels = [t[s:l-1].tolist() for t, s, l in zip(labels, labels_start, labels_lens)]
-                batch_risks = []
-                for b in range(self.model.beam_size):
-                    predictions = [t[b][1:l[b]-1].tolist() for t, l in zip(beams, beam_lens)]
-                    risks = torch.tensor(risk_func(predictions, labels), dtype=torch.float, device=self.device)
-                    batch_risks.append(risks)
-                batch_risks = torch.stack(batch_risks, dim=-1)
-
-                if self.single_input:
-                    beams = [torch.cat([context.repeat(beam.shape[0], 1), beam], dim=1) for beam, context in zip(beams, contexts)]
-                    beam_lens = [beam_len + context.shape[1] for beam_len, context in zip(beam_lens, contexts)]
-                    beam_lens = torch.stack(beam_lens, dim=0)
-
-                batch_probas = []
-                for b in range(self.model.beam_size):
-                    if self.single_input:
-                        current_beam = pad_sequence([beam[b][:-1] for beam in beams], batch_first=True, padding_value=self.model.padding_idx)
-                        inputs = current_beam[..., :-1]
-                        outputs = current_beam[..., 1:]
-                    else:
-                        inputs = beams[:, b, :-1]
-                        outputs = beams[:, b, 1:]
-
-                    logits = self.model.decode(inputs, enc_contexts)
-                    probas = F.log_softmax(logits.float(), dim=-1)
-                    probas = torch.gather(probas, -1, outputs.unsqueeze(-1)).squeeze(-1)
-                    probas = probas.sum(dim=-1) / beam_lens[:, b].float()
-                    batch_probas.append(probas)
-                batch_probas = torch.stack(batch_probas, dim=-1)
-                batch_probas = F.softmax(batch_probas, dim=-1)
-
-                batch_risk_loss = torch.mean((batch_risks * batch_probas).sum(dim=-1))
+            batch_risk_loss = self._risk_loss(contexts, targets, enc_contexts, risk_func)
 
             # optimization
             full_loss = (self.lm_weight * batch_lm_loss
@@ -300,7 +344,6 @@ class Trainer:
 
                 self.global_step += 1
 
-
     def _eval_test(self, metric_funcs={}, external_metrics_func=None, epoch=-1):
         with torch.no_grad():
             self.model.eval()
@@ -315,40 +358,17 @@ class Trainer:
                 enc_contexts = []
 
                 # lm loss
-                batch_lm_loss = torch.tensor(0, dtype=torch.float, device=self.device)
-                if not self.single_input:
-                    for context in contexts:
-                        enc_context = self.model.encode(context.clone())
-                        enc_contexts.append(enc_context)
-
-                        context_outputs = self.model.generate(enc_context[0])
-                        ignore_mask = torch.stack([context == idx for idx in self.ignore_idxs], dim=-1).any(dim=-1)
-                        context.masked_fill_(ignore_mask, self.model.padding_idx)
-                        prevs = context_outputs[:, :-1, :].contiguous()
-                        nexts = context[:, 1:].contiguous() if context.dim() == 2 else context[:, 1:, 0].contiguous()
-                        batch_lm_loss += (self.lm_criterion(prevs.view(-1, prevs.shape[-1]).float(), nexts.view(-1)) / len(contexts))
+                batch_lm_loss = self._lm_loss(contexts, enc_contexts)
                 metrics['lm_loss'] = (metrics['lm_loss'] * i + batch_lm_loss.item()) / (i + 1)
 
                 # s2s loss on targets
-                nexts = targets[:, 1:].contiguous() if targets.dim() == 2 else targets[:, 1:, 0].contiguous()
-                if negative_samples > 0:
-                    # Keep the hidden states for hits@1 loss
-                    hidden_state, padding_mask, _ = self.model.transformer_module(targets, enc_contexts)
-                    outputs = self.model.generate(hidden_state[:, :-1].contiguous())
-                else:
-                    outputs = self.model.decode(targets[:, :-1].contiguous(), enc_contexts)
-                batch_s2s_loss = self.lm_criterion(outputs.view(-1, outputs.shape[-1]).float(), nexts.view(-1))  # We evaluate with CrossEntropy
+                batch_s2s_loss, hidden_state, padding_mask = self._s2s_loss(targets, enc_contexts,
+                                                                            negative_samples, train=False)
                 metrics['s2s_loss'] = (metrics['s2s_loss'] * i + batch_s2s_loss.item()) / (i + 1)
 
                 # hits@1 loss on distractors and targets
-                batch_hits_acc = torch.tensor(0, dtype=torch.float, device=self.device)
-                if negative_samples > 0 and self.model.multiple_choice_head is not None:
-                    extended_contexts = repeat_along_dim1(enc_contexts, negative_samples)
-                    neg_logits = self.model.decode_classify(distractors, extended_contexts)
-                    true_logits = self.model.classify(hidden_state, padding_mask)
-                    clf_logits = torch.cat((true_logits.view(-1, 1), neg_logits.view(-1, negative_samples)), dim=1)
-                    clf_labels = torch.tensor([0] * len(true_logits), dtype=torch.long, device=self.device)
-                    batch_hits_acc = torch.sum(torch.max(clf_logits, dim=1)[1] == clf_labels).float() / clf_labels.shape[0]
+                batch_hits_acc = self._hist_loss(distractors, hidden_state, padding_mask,
+                                                 enc_contexts, negative_samples, train=False)
                 metrics['hits_acc'] = (metrics['hits_acc'] * i + batch_hits_acc.item()) / (i + 1)
 
                 # full sequence loss
