@@ -25,6 +25,7 @@ from .utils import repeat_along_dim1
 
 logger = logging.getLogger(__file__)
 
+
 class MultipleChoiceHead(nn.Module):
     """ Classifier Head for the transformer """
 
@@ -132,8 +133,9 @@ class TransformerModel(nn.Module):
 
     def predict(self, contexts=[]):
         if self.single_input:
+            assert isinstance(contexts, torch.Tensor)
             enc_contexts = []
-            beam_starts = torch.cat(contexts, dim=1)
+            beam_starts = contexts
         else:
             enc_contexts = [self.encode(c) for c in contexts]
             beam_starts = None
@@ -170,6 +172,7 @@ class TransformerModel(nn.Module):
 
             max_seq_len = min(self.n_pos_embeddings - prevs.shape[1] - (beam_starts.shape[1] if beam_starts is not None else 0),
                               self.max_seq_len)
+
             for i in range(max_seq_len):
                 inputs = prevs if past is None else prevs[:, -1:, ...]  # only use the last token (rest is in past)
                 if self.dialog_embeddings and inputs.dim() < 3:

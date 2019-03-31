@@ -223,8 +223,14 @@ class TransformerAgent(Agent):
             ids = self._add_dialog_embeddings(ids, self.vocab.sent_dialog_id)
             return torch.tensor(ids, dtype=torch.long)
 
-        def to_cuda(data_list):
-            return list(map(lambda x: x.cuda(), data_list)) if self.use_cuda else data_list
+        def to_cuda(data):
+            if not self.use_cuda:
+                return data
+
+            if isinstance(data, (list, tuple)):
+                return list(map(lambda x: x.cuda(), data))
+
+            return data.cuda()
 
         batch_reply = [{'id': self.getID(), 'text': '', 'text_candidates': []} for _ in range(len(observations))]
         valid_ids = [i for i, obs in enumerate(observations) if is_valid_history(obs['agent'].history)]
@@ -249,16 +255,15 @@ class TransformerAgent(Agent):
                 contexts.append(dialogs)
 
             if self.single_input:
-                contexts = [torch.cat(c, dim=0).unsqueeze(0) for c in zip(*contexts)]
+                contexts = [torch.cat(c, dim=0) for c in zip(*contexts)]
+                contexts = pad_sequence(contexts, batch_first=True, padding_value=self.model.padding_idx, left=True)
             else:
                 contexts = map(lambda x: pad_sequence(x, batch_first=True, padding_value=self.model.padding_idx),
                                contexts)
 
             contexts = to_cuda(contexts)
 
-            # because of different lens of context when single_input == True
-            pred_texts = [self.model.predict([c])[0] for c in contexts] if self.single_input \
-                          else self.model.predict(contexts)
+            pred_texts = self.model.predict(contexts)
 
             for i in range(batch_size):
                 pred_toks = self._process_2nd_replica(pred_texts[i])
@@ -268,8 +273,9 @@ class TransformerAgent(Agent):
 
             if self.opt['rank_candidates']:
                 if self.single_input:
-                    enc_contexts = []
-                    contexts = list(map(lambda x: x.squeeze(0), contexts))
+                    raise NotImplementedError
+                    # enc_contexts = []
+                    # contexts = list(map(lambda x: x.squeeze(0), contexts))
                 else:
                     enc_contexts = [self.model.encode(c) for c in contexts]
 
