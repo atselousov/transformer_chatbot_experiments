@@ -170,15 +170,15 @@ class TransformerModel(nn.Module):
             diversity_penalty = torch.zeros((batch_size, self.n_embeddings), device=device)
             past = None
 
-            max_seq_len = min(self.n_pos_embeddings - prevs.shape[1] - (beam_starts.shape[1] if beam_starts is not None else 0),
-                              self.max_seq_len)
+            # max_seq_len = min(self.n_pos_embeddings - prevs.shape[1] - (beam_starts.shape[1] if beam_starts is not None else 0),
+            #                   self.max_seq_len)
 
-            for i in range(max_seq_len):
+            for i in range(self.max_seq_len):
                 inputs = prevs if past is None else prevs[:, -1:, ...]  # only use the last token (rest is in past)
                 if self.dialog_embeddings and inputs.dim() < 3:
                     inputs = torch.stack((inputs, torch.full_like(inputs, self.sent_dialog_id)), dim=inputs.dim())
                 if i == 0 and beam_starts is not None:
-                    inputs = torch.cat((beam_starts, inputs), dim=1)
+                    inputs = torch.cat((beam_starts, inputs), dim=1)[:, -self.n_pos_embeddings:]
                 outputs, _, past = self.transformer_module(inputs, beam_enc_contexts, past=past)
 
                 logits = self.generate(outputs[:, -1, :])

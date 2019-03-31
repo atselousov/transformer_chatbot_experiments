@@ -164,8 +164,8 @@ class Trainer:
         distractors = pad_sequence(distractors, batch_first=True, padding_value=self.model.padding_idx)
         if not self.single_input:
             contexts = [pad_sequence(c, batch_first=True, padding_value=self.model.padding_idx) for c in contexts]
-        else:
-            contexts = [t.unsqueeze(0) for t in contexts]
+        # else:
+        #     contexts = [t.unsqueeze(0) for t in contexts]
 
         return contexts, y_out, distractors
 
@@ -236,18 +236,15 @@ class Trainer:
         self.model.eval()  # desactivate dropout
 
         if self.single_input:
-            beams, beam_lens = [], []
-            for b in range(targets.shape[0]):
-                beam_outputs = self.model.beam_search(beam_starts=contexts[b], return_beams=True)
-                beams.append(beam_outputs[0].squeeze(0))
-                beam_lens.append(beam_outputs[1].squeeze(0))
+            beam_starts = pad_sequence(contexts, batch_first=True, padding_value=self.model.padding_idx, left=True)
+            beams, beam_lens = self.model.beam_search(beam_starts=beam_starts, return_beams=True)
         else:
             beams, beam_lens = self.model.beam_search(enc_contexts=enc_contexts, return_beams=True)
         self.model.train()  # re-activate dropout
 
         labels = targets if targets.dim() == 2 else targets[:, :, 0]
         labels_lens = labels.ne(self.model.padding_idx).sum(dim=-1)
-        labels_start = [context.shape[1] + 1 for context in contexts] if self.single_input else [1] * len(labels)
+        labels_start = [context.shape[0] + 1 for context in contexts] if self.single_input else [1] * len(labels)
         labels = [t[s:l - 1].tolist() for t, s, l in zip(labels, labels_start, labels_lens)]
 
         batch_risks = []
@@ -260,7 +257,7 @@ class Trainer:
         if self.single_input:
             beams = [torch.cat([context.repeat(beam.shape[0], 1), beam], dim=1) for beam, context in
                      zip(beams, contexts)]
-            beam_lens = [beam_len + context.shape[1] for beam_len, context in zip(beam_lens, contexts)]
+            beam_lens = [beam_len + context.shape[0] for beam_len, context in zip(beam_lens, contexts)]
             beam_lens = torch.stack(beam_lens, dim=0)
 
         batch_probas = []
@@ -374,16 +371,14 @@ class Trainer:
                 # full sequence loss
                 if self.evaluate_full_sequences:
                     if self.single_input:
-                        predictions = []
-                        for b in range(targets.shape[0]):
-                            beam_outputs = self.model.beam_search(beam_starts=contexts[b])
-                            predictions.append(beam_outputs)
-                        predictions = sum(predictions, [])
+                        beam_starts = pad_sequence(contexts, batch_first=True, padding_value=self.model.padding_idx,
+                                                   left=True)
+                        predictions = self.model.beam_search(beam_starts=beam_starts)
                     else:
                         predictions = self.model.beam_search(enc_contexts=enc_contexts, beam_starts=torch.cat(contexts, dim=1) if self.single_input else None)
                     labels = targets if targets.dim() == 2 else targets[:, :, 0]
                     labels_lens = labels.ne(self.model.padding_idx).sum(dim=-1)
-                    labels_start = [context.shape[1] + 1 for context in contexts] if self.single_input else [1] * len(targets)
+                    labels_start = [context.shape[0] + 1 for context in contexts] if self.single_input else [1] * len(targets)
                     labels = [t[s:l-1].tolist() for t, s, l in zip(labels, labels_start, labels_lens)]
 
                     for name, func in metric_funcs.items():
