@@ -112,8 +112,8 @@ class MultiheadAttention(nn.Module):
 
         if padding_mask is not None:
             w.masked_fill_(padding_mask.unsqueeze(1).unsqueeze(2), float('-inf'))
-
         w = F.softmax(w, dim=-1)
+        w[w != w] = 0 # delete nans for seqs with left padding when single_input == True
         w = self.dropout(w)
 
         if padding_mask is not None:
