@@ -272,12 +272,7 @@ class TransformerAgent(Agent):
                 batch_reply[valid_ids[i]]['episode_done'] = valid_observations[i]['agent'].episode_done
 
             if self.opt['rank_candidates']:
-                if self.single_input:
-                    raise NotImplementedError
-                    # enc_contexts = []
-                    # contexts = list(map(lambda x: x.squeeze(0), contexts))
-                else:
-                    enc_contexts = [self.model.encode(c) for c in contexts]
+                enc_contexts = [self.model.encode(c) for c in contexts] if not self.single_input else []
 
                 candidates = [list(obs.get('label_candidates', [])) for obs in valid_observations]
                 lens_candidates = [len(c) for c in candidates]
@@ -290,13 +285,12 @@ class TransformerAgent(Agent):
                         current_cands = [to_tensor(c[i])[:self.model.n_pos_embeddings-1] for c in candidates]
                         current_cands = to_cuda(current_cands)
 
-                        if self.single_input:
-                            lens = map(lambda x: x.size(0), current_cands)
-                            current_cands = [torch.cat(c, dim=0)[:self.model.n_pos_embeddings-1] for c in
-                                             zip(contexts, current_cands)]
-
+                        lens = map(lambda x: x.size(0), current_cands) if self.single_input else None
                         current_cands = pad_sequence(current_cands, batch_first=True,
                                                      padding_value=self.model.padding_idx)
+                        if self.single_input:
+                            current_cands = torch.cat((contexts, current_cands), dim=1)[-self.model.n_pos_embeddings:]
+
                         logits = self.model.decode(current_cands[:, :-1], enc_contexts)
 
                         if current_cands.dim() == 3:
