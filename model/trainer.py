@@ -164,8 +164,6 @@ class Trainer:
         distractors = pad_sequence(distractors, batch_first=True, padding_value=self.model.padding_idx)
         if not self.single_input:
             contexts = [pad_sequence(c, batch_first=True, padding_value=self.model.padding_idx) for c in contexts]
-        # else:
-        #     contexts = [t.unsqueeze(0) for t in contexts]
 
         return contexts, y_out, distractors
 
@@ -188,7 +186,7 @@ class Trainer:
                 batch_lm_loss += self.lm_criterion(prevs.view(-1, prevs.shape[-1]).float(), nexts.view(-1)) / len(contexts)
         return batch_lm_loss
 
-    def _s2s_loss(self, targets, enc_contexts, negative_samples, train=True):
+    def _s2s_loss(self, targets, enc_contexts, negative_samples):
         hidden_state, padding_mask = None, None
 
         nexts = targets[:, 1:].contiguous() if targets.dim() == 2 else targets[:, 1:, 0].contiguous()
@@ -199,16 +197,13 @@ class Trainer:
         else:
             outputs = self.model.decode(targets[:, :-1].contiguous(), enc_contexts)
 
-        if train:
-            outputs = F.log_softmax(outputs.float(), dim=-1)
-            loss = self.criterion(outputs.view(-1, outputs.shape[-1]), nexts.view(-1))
-        else:
-            loss = self.lm_criterion(outputs.view(-1, outputs.shape[-1]).float(),
-                                     nexts.view(-1))  # We evaluate with CrossEntropy
+        outputs = outputs.view(-1, outputs.shape[-1]).float()
+        nexts = nexts.view(-1)
 
-        return loss, hidden_state, padding_mask
+        loss = self.criterion(outputs, nexts) if self.model.training else self.lm_criterion(outputs, nexts)
+        return loss, hidden_state, padding_mask 
 
-    def _hist_loss(self, distractors, hidden_state, padding_mask, enc_contexts, negative_samples, train=True):
+    def _hist_loss(self, distractors, hidden_state, padding_mask, enc_contexts, negative_samples):
         batch_hits_loss = torch.tensor(0, dtype=torch.float, device=self.device)
 
         if not (self.hits_weight > 0 and negative_samples > 0 and self.model.multiple_choice_head is not None):
@@ -221,7 +216,7 @@ class Trainer:
             clf_logits = torch.cat((true_logits.view(-1, 1), neg_logits.view(-1, negative_samples)), dim=1)
             clf_labels = torch.tensor([0] * len(true_logits), dtype=torch.long, device=self.device)
 
-            batch_hits_loss = self.hits_criterion(clf_logits.float(), clf_labels) if train else \
+            batch_hits_loss = self.hits_criterion(clf_logits.float(), clf_labels) if self.model.training else \
                               torch.sum(torch.max(clf_logits, dim=1)[1] == clf_labels).float() / clf_labels.shape[0]
 
         return batch_hits_loss
@@ -360,12 +355,12 @@ class Trainer:
 
                 # s2s loss on targets
                 batch_s2s_loss, hidden_state, padding_mask = self._s2s_loss(targets, enc_contexts,
-                                                                            negative_samples, train=False)
+                                                                            negative_samples)
                 metrics['s2s_loss'] = (metrics['s2s_loss'] * i + batch_s2s_loss.item()) / (i + 1)
 
                 # hits@1 loss on distractors and targets
                 batch_hits_acc = self._hist_loss(distractors, hidden_state, padding_mask,
-                                                 enc_contexts, negative_samples, train=False)
+                                                 enc_contexts, negative_samples)
                 metrics['hits_acc'] = (metrics['hits_acc'] * i + batch_hits_acc.item()) / (i + 1)
 
                 # full sequence loss

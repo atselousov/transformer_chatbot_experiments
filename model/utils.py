@@ -68,17 +68,9 @@ def pad_sequence(sequences, batch_first=False, padding_value=0, left=False):
     out_tensor = sequences[0].data.new(*out_dims).fill_(padding_value)
     for i, tensor in enumerate(sequences):
         length = tensor.size(0)
-        # use index notation to prevent duplicate references to the tensor
-        if left:
-            if batch_first:
-                out_tensor[i, -length:] = tensor
-            else:
-                out_tensor[-length:, i] = tensor
-        else:
-            if batch_first:
-                out_tensor[i, :length, ...] = tensor
-            else:
-                out_tensor[:length, i, ...] = tensor
+        s_slice = slice(-length, None) if left else slice(None, length)
+        s_slice = (i, s_slice) if batch_first else (s_slice, i)
+        out_tensor[s_slice] = tensor
 
     return out_tensor
 
