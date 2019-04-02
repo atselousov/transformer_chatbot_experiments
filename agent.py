@@ -256,6 +256,7 @@ class TransformerAgent(Agent):
 
             if self.single_input:
                 contexts = [torch.cat(c, dim=0) for c in zip(*contexts)]
+                raw_context = contexts if self.opt['rank_candidates'] else None
                 contexts = pad_sequence(contexts, batch_first=True, padding_value=self.model.padding_idx, left=True)
             else:
                 contexts = map(lambda x: pad_sequence(x, batch_first=True, padding_value=self.model.padding_idx),
@@ -283,13 +284,16 @@ class TransformerAgent(Agent):
 
                     for i in range(max(lens_candidates)):
                         current_cands = [to_tensor(c[i])[:self.model.n_pos_embeddings-1] for c in candidates]
-                        current_cands = to_cuda(current_cands)
 
                         lens = map(lambda x: x.size(0), current_cands) if self.single_input else None
+                        if self.single_input:
+                            lens = map(lambda x: x.size(0), current_cands)
+                            current_cands = [torch.cat(c, dim=0)[-self.model.n_pos_embeddings:]
+                                             for c in zip(raw_context, current_cands)]
+
+                        current_cands = to_cuda(current_cands)
                         current_cands = pad_sequence(current_cands, batch_first=True,
                                                      padding_value=self.model.padding_idx)
-                        if self.single_input:
-                            current_cands = torch.cat((contexts, current_cands), dim=1)[-self.model.n_pos_embeddings:]
 
                         logits = self.model.decode(current_cands[:, :-1], enc_contexts)
 
