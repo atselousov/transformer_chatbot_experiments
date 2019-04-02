@@ -114,7 +114,7 @@ class MultiheadAttention(nn.Module):
             w.masked_fill_(padding_mask.unsqueeze(1).unsqueeze(2), float('-inf'))
         w = F.softmax(w, dim=-1)
 
-        if torch.any(torch.isnan(w)):
+        if torch.any(torch.isnan(w)).item():
             w_clone = w.clone()
             w[w_clone != w_clone] = 0 # delete nans for seqs with left padding when single_input == True
         w = self.dropout(w)
