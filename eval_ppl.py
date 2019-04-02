@@ -1,8 +1,10 @@
 import torch
 from torch.nn import functional as F
-from projects.convai2.eval_ppl import setup_args, eval_ppl
-from projects.convai2.build_dict import build_dict
+
 from agent import TransformerAgent
+from projects.convai2.build_dict import build_dict
+from projects.convai2.eval_ppl import eval_ppl, setup_args
+
 
 class TransformerAgentPpl(TransformerAgent):
     def __init__(self, opt, shared=None):
@@ -63,6 +65,7 @@ class TransformerAgentPpl(TransformerAgent):
                 dist[word] = probs[self.vocab.token2id[prefix]].item() * ratio
         return dist
 
+
 if __name__ == '__main__':
     parser = setup_args()
 
@@ -70,9 +73,6 @@ if __name__ == '__main__':
                         batchsize=1,
                         rank_candidates=False,
                         sample=False,
-                        wild_mode=False,
-                        clean_emoji=False,
-                        check_grammar=False,
                         max_seq_len=256,
                         beam_size=1,
                         annealing_topk=None,
@@ -80,4 +80,3 @@ if __name__ == '__main__':
                         length_penalty=0.6)
     opt = parser.parse_args()
     eval_ppl(opt)
-

@@ -1,14 +1,13 @@
+from collections import deque
+
 import torch
 import torch.nn.functional as F
-from collections import deque
-from parlai.core.agents import Agent
-from model.transformer_model import TransformerModel
-from model.text import BPEVocab
-from model.utils import pad_sequence
-from model.postprocessing import ngram_replaser, ReplyChecker, detokenize, syntax_fix
-from model.sentiment import pick_emoji, clean_emoji
+
 from config import get_model_config
-import random
+from model.text import BPEVocab
+from model.transformer_model import TransformerModel
+from model.utils import pad_sequence
+from parlai.core.agents import Agent
 
 
 class TransformerAgent(Agent):
@@ -24,11 +23,6 @@ class TransformerAgent(Agent):
                                 help='Whether the model should parse candidates for ranking.')
         agent_args.add_argument('--sample', type=bool, default=False,
                                 help='Sampling of beam from beam search')
-        agent_args.add_argument('--clean_emoji', type=bool, default=True,
-                                help='')
-        agent_args.add_argument('--check_grammar', type=bool, default=True,
-                                help='')
-
         agent_args.add_argument('--max_seq_len', type=int, default=128,
                                 help='')
         agent_args.add_argument('--beam_size', type=int, default=1,
@@ -58,8 +52,6 @@ class TransformerAgent(Agent):
         model_config = get_model_config()
         self.vocab = BPEVocab.from_files(model_config.bpe_vocab_path, model_config.bpe_codes_path)
 
-        self.clean_emoji = self.opt['clean_emoji']
-        self.check_grammar = self.opt['check_grammar']
         self.dialog_embeddings = model_config.dialog_embeddings
         self.use_start_end = model_config.use_start_end
         self.single_input = model_config.single_input
@@ -132,28 +124,17 @@ class TransformerAgent(Agent):
 
         self.reset()
 
-    def _preprocess_text(self, text):
-        if self.clean_emoji:
-            text = clean_emoji(text)
-
-        if self.check_grammar:
-            text = syntax_fix(text).lower()
-
-        return text
-
     def _parse(self, text):
-        # todo: fix grammar mistakes?
         persona_info = []
         dialog = []
+
         for subtext in text.split('\n'):
             subtext = subtext.strip()
             
             if subtext.startswith('your persona:'):
                 subtext = subtext.replace('your persona:', '').strip()
-                subtext = self._preprocess_text(subtext).strip()
                 persona_info.append(subtext)
             else:
-                subtext = self._preprocess_text(subtext).strip()
                 dialog.append(subtext)
 
         return persona_info, dialog

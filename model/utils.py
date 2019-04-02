@@ -14,18 +14,18 @@
 #  You should have received a copy of the GNU Affero General Public License
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import re
-import os
-import sys
+import copy
 import io
 import json
+import os
 import random
-import copy
-from collections import namedtuple, Counter
+import re
+import sys
+from collections import Counter, namedtuple
 
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
 from scipy.interpolate import RectBivariateSpline
 from torch.utils.checkpoint import checkpoint
 

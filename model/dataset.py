@@ -16,9 +16,11 @@
 
 import os
 import random
+
 import torch
-from tqdm import tqdm
 from torch.utils.data import Dataset
+from tqdm import tqdm
+
 from .postprocessing import augment_replica
 
 

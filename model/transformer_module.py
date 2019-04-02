@@ -14,11 +14,13 @@
 #  You should have received a copy of the GNU Affero General Public License
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import math
-import torch
 import logging
+import math
+
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 from .utils import checkpoint_sequential
 
 logger = logging.getLogger(__file__)

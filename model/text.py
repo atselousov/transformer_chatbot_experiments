@@ -14,10 +14,12 @@
 #  You should have received a copy of the GNU Affero General Public License
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import spacy
-import ftfy
 from collections import Counter, defaultdict
+
+import ftfy
+import spacy
 from tqdm import trange
+
 
 class SpacyLowerTokenizer:
     def __init__(self):

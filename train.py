@@ -1,19 +1,21 @@
-import os
-import torch
-import random
-import logging
 import argparse
 import json
+import logging
+import os
+import random
 import sys
-from tensorboardX import SummaryWriter
 
-from model.utils import load_openai_weights, set_seed, f1_score, open, unicode
-from model.transformer_model import TransformerModel
-from model.trainer import Trainer
-from model.text import BPEVocab
-from model.dataset import FacebookDataset
+from tensorboardX import SummaryWriter
+import torch
+
 from config import get_model_config, get_trainer_config
 from metrics import nlp_metrics
+from model.dataset import FacebookDataset
+from model.text import BPEVocab
+from model.trainer import Trainer
+from model.transformer_model import TransformerModel
+from model.utils import f1_score, load_openai_weights, open, set_seed, unicode
+
 
 class DummyWriter:
     """ Used for distributed training (from NVIDIA apex example).
