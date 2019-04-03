@@ -262,11 +262,11 @@ class Trainer:
             outputs = beams[:, b, 1:]
 
             outputs = outputs[:, :, 0] if outputs.dim() == 3 else outputs
-
             logits = self.model.decode(inputs, enc_contexts)
 
             probas = F.log_softmax(logits.float(), dim=-1)
             probas = torch.gather(probas, -1, outputs.unsqueeze(-1)).squeeze(-1)
+            probas.masked_fill_(outputs.eq(self.model.padding_idx), 0)
             probas = probas[:, start:] if self.single_input else probas
 
             probas = probas.sum(dim=-1) / beam_lens[:, b].float()
