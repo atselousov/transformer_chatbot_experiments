@@ -200,7 +200,8 @@ class Trainer:
         outputs = outputs.view(-1, outputs.shape[-1]).float()
         nexts = nexts.view(-1)
 
-        loss = self.criterion(outputs, nexts) if self.model.training else self.lm_criterion(outputs, nexts)
+        loss = self.criterion(F.log_softmax(outputs, dim=-1), nexts) if self.model.training \
+               else self.lm_criterion(outputs, nexts)
         return loss, hidden_state, padding_mask
 
     def _hist_loss(self, distractors, hidden_state, padding_mask, enc_contexts, negative_samples):

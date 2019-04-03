@@ -217,7 +217,8 @@ def main():
 
     def f1_risk(predictions, targets):
         scores = f1_score(predictions, targets, average=False)
-        return [-s for s in scores]
+        assert all([0 <= s <= 1.0 for s in scores])
+        return [1 - s for s in scores]
 
     def get_risk_metric_func(risk_metric):
         """ risk_metric selected in:
@@ -227,7 +228,8 @@ def main():
             string_targets = list(vocab.ids2string(t) for t in targets)
             string_predictions = list(vocab.ids2string(t) for t in predictions)
             metrics = [external_metrics_func([t], [p], epoch=-1)[risk_metric] for p, t in zip(string_predictions, string_targets)]
-            return [-m for m in metrics]
+            assert all([0 <= s <= 1.0 for s in metrics])
+            return [1 - m for m in metrics]
 
         if risk_metric == 'f1':
             return f1_risk
