@@ -201,7 +201,7 @@ class Trainer:
         nexts = nexts.view(-1)
 
         loss = self.criterion(outputs, nexts) if self.model.training else self.lm_criterion(outputs, nexts)
-        return loss, hidden_state, padding_mask 
+        return loss, hidden_state, padding_mask
 
     def _hist_loss(self, distractors, hidden_state, padding_mask, enc_contexts, negative_samples):
         batch_hits_loss = torch.tensor(0, dtype=torch.float, device=self.device)
@@ -226,8 +226,6 @@ class Trainer:
         if not (risk_func is not None and self.risk_weight > 0):
             return torch.tensor(0, dtype=torch.float, device=self.device)
 
-        assert risk_func is not None
-
         self.model.eval()  # desactivate dropout
 
         if self.single_input:
@@ -235,6 +233,7 @@ class Trainer:
             beams, beam_lens = self.model.beam_search(beam_starts=beam_starts, return_beams=True)
         else:
             beams, beam_lens = self.model.beam_search(enc_contexts=enc_contexts, return_beams=True)
+
         self.model.train()  # re-activate dropout
 
         labels = targets if targets.dim() == 2 else targets[:, :, 0]
@@ -249,27 +248,29 @@ class Trainer:
             batch_risks.append(risks)
         batch_risks = torch.stack(batch_risks, dim=-1)
 
+        if self.model.dialog_embeddings:
+            beams = torch.stack((beams, torch.full_like(beams, self.model.sent_dialog_id)), dim=beams.dim())
+
         if self.single_input:
-            beams = [torch.cat([context.repeat(beam.shape[0], 1), beam], dim=1) for beam, context in
-                     zip(beams, contexts)]
-            beam_lens = [beam_len + context.shape[0] for beam_len, context in zip(beam_lens, contexts)]
-            beam_lens = torch.stack(beam_lens, dim=0)
+            start = beam_starts.size(1)
+            beam_starts = beam_starts.repeat([1, self.model.beam_size] + [1] * len(beam_starts.size()[1:]))
+            beams = torch.cat((beam_starts, beams), dim=2)
 
         batch_probas = []
         for b in range(self.model.beam_size):
-            if self.single_input:
-                current_beam = pad_sequence([beam[b][:-1] for beam in beams], batch_first=True,
-                                            padding_value=self.model.padding_idx)
-                inputs = current_beam[..., :-1]
-                outputs = current_beam[..., 1:]
-            else:
-                inputs = beams[:, b, :-1]
-                outputs = beams[:, b, 1:]
+            inputs = beams[:, b, :-1]
+            outputs = beams[:, b, 1:]
+
+            outputs = outputs[:, :, 0] if outputs.dim() == 3 else outputs
 
             logits = self.model.decode(inputs, enc_contexts)
+
             probas = F.log_softmax(logits.float(), dim=-1)
             probas = torch.gather(probas, -1, outputs.unsqueeze(-1)).squeeze(-1)
+            probas = probas[:, start:] if self.single_input else probas
+
             probas = probas.sum(dim=-1) / beam_lens[:, b].float()
+
             batch_probas.append(probas)
         batch_probas = torch.stack(batch_probas, dim=-1)
         batch_probas = F.softmax(batch_probas, dim=-1)
