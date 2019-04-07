@@ -138,8 +138,6 @@ class BPEVocab:
 
             if codes[0].startswith('#version:'):
                 codes = codes[1:]
-            if len(codes[-1]) == 0:
-                codes = codes[:-1]
 
             codes = [tuple(c.split()) for c in codes if c]
 
