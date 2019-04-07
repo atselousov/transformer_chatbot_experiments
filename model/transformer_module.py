@@ -14,59 +14,96 @@
 #  You should have received a copy of the GNU Affero General Public License
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import copy
 import math
 import torch
-import logging
 import torch.nn as nn
 import torch.nn.functional as F
-from .utils import checkpoint_sequential
 
-logger = logging.getLogger(__file__)
 
 try:
-    from apex.normalization.fused_layer_norm import FusedLayerNorm as LayerNorm
+    from apex.normalization import FusedLayerNorm as LayerNorm
 except ImportError:
     print("Better speed can be achieved with apex installed from https://www.github.com/nvidia/apex.")
     from torch.nn import LayerNorm
 
 
 class ConstantPositionalEmbedding(nn.Module):
-    def __init__(self, embedding_dim, padding_idx):
-        super(ConstantPositionalEmbedding, self).__init__()
+    def __init__(self, embedding_dim):
+        super().__init__()
 
         self.embedding_dim = embedding_dim
-        self.padding_idx = padding_idx
-        self.register_buffer('_position_embedding',
-                             ConstantPositionalEmbedding.get_embedding(1024,
-                                                                       self.embedding_dim))
+        self.register_buffer('_embedding', ConstantPositionalEmbedding.get_embedding(1024, self.embedding_dim))
 
-    @classmethod
-    def get_embedding(cls, seq_len, embedding_dim, device=None):
-        seq_len += 1
+    @staticmethod
+    def get_embedding(n_embeddings, embedding_dim, device=None):
+        n_embeddings += 1  # 0 is the padding
 
         half_dim = embedding_dim // 2
-
         emb = math.log(10000) / (half_dim - 1)
-        emb = torch.exp(torch.arange(half_dim, dtype=torch.float32, device=device) * -emb)
-        emb = torch.arange(seq_len, dtype=torch.float32, device=device).unsqueeze(1) * emb.unsqueeze(0)
-        emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1).view(seq_len, -1)
+        emb = torch.exp(torch.arange(half_dim, dtype=torch.float, device=device) * -emb)
+        emb = torch.arange(n_embeddings, dtype=torch.float, device=device).unsqueeze(1) * emb.unsqueeze(0)
+        emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1).view(n_embeddings, -1)
+        emb[0, :] = 0
 
         if embedding_dim % 2:
-            emb = torch.cat([emb, torch.zeros(seq_len, 1)], dim=1)
+            emb = torch.cat([emb, torch.zeros(n_embeddings, 1, dtype=torch.float, device=device)], dim=1)
 
         return emb
 
     def forward(self, positions):
-        batch_size, seq_len = positions.size()
+        batch_size, seq_length = positions.shape
 
-        cur_seq_len = max(seq_len, torch.max(positions).item())
+        if seq_length >= self._position_embedding.shape[0]:
+            self._embedding = ConstantPositionalEmbedding.get_embedding(seq_length,
+                                                                        self.embedding_dim,
+                                                                        self._embedding.device)
 
-        if cur_seq_len >= self._position_embedding.size(0):
-            self._position_embedding = ConstantPositionalEmbedding.get_embedding(cur_seq_len,
-                                                                                 self.embedding_dim,
-                                                                                 positions.device)
+        positions = positions.view(-1)
+        pos_embeddings = self._embedding.index_select(0, positions)
+        pos_embeddings = pos_embeddings.view(batch_size, seq_length, -1)
 
-        return self._position_embedding.index_select(0, positions.view(-1)).view(batch_size, seq_len, -1)
+        return pos_embeddings
+
+
+class CombinedEmbedding(nn.Module):
+    def __init__(self, n_embeddings, n_pos_embeddings, embedding_dim, padding_idx=None,
+                 constant_pos_embedding=False, sparse=False):
+        super().__init__()
+
+        self.tok_padding_idx = padding_idx
+        self.pos_padding_idx = 0
+
+        self.tok_embedding = nn.Embedding(n_embeddings, embedding_dim,
+                                          padding_idx=self.tok_padding_idx, sparse=sparse)
+        if constant_pos_embedding:
+            self.pos_embedding = ConstantPositionalEmbedding(embedding_dim)
+        else:
+            self.pos_embedding = nn.Embedding(n_pos_embeddings + 1, embedding_dim,
+                                              padding_idx=self.pos_padding_idx, sparse=sparse)
+
+        self._init_weights()
+
+    def _init_weights(self):
+        nn.init.normal_(self.tok_embedding.weight, std=0.02)
+        if isinstance(self.pos_embedding, nn.Embedding):
+            nn.init.normal_(self.pos_embedding.weight, std=0.01)
+
+    def forward(self, x, add_length=0):
+        assert x.dim() == 2 or x.dim() == 3
+
+        if x.dim() == 2:
+            x = x.unsqueeze(2)  # additional embeddings
+
+        padding_mask = x[:, :, 0].eq(self.tok_padding_idx)
+        positions = torch.cumsum(~padding_mask, dim=-1, dtype=torch.long) + add_length
+        positions.masked_fill_(padding_mask, self.pos_padding_idx)
+
+        x = self.tok_embedding(x)
+        x = x.sum(dim=2)
+        x += self.pos_embedding(positions)
+
+        return x, padding_mask
 
 
 class MultiheadAttention(nn.Module):
@@ -74,19 +111,23 @@ class MultiheadAttention(nn.Module):
     def _get_future_mask(cls, size, device):
         nd, ns = size
         max_size = max(nd, ns)
-        if not hasattr(cls, '_future_mask') or cls._future_mask.device != device or any(s<max_size for s in cls._future_mask.shape):
+        if not hasattr(cls, '_future_mask') or \
+                cls._future_mask.device != device or \
+                any(s < max_size for s in cls._future_mask.shape):
             cls._future_mask = torch.triu(torch.ones(max_size, max_size, dtype=torch.uint8, device=device), 1)
 
         mask = cls._future_mask[ns-nd:ns, :ns]  # future mask when we already may have past pre-computed values: take a slice at the end of the mask
 
         return mask
 
-    def __init__(self, n_features, n_heads, dropout):
-        super(MultiheadAttention, self).__init__()
+    def __init__(self, n_features, n_heads, dropout, future_mask=True):
+        super().__init__()
+
         assert n_features % n_heads == 0
 
         self.n_features = n_features
         self.n_heads = n_heads
+        self.future_mask = future_mask
         self.qkv_proj = nn.Linear(n_features, 3 * n_features)
         self.out_proj = nn.Linear(n_features, n_features)
         self.dropout = nn.Dropout(dropout)
@@ -129,34 +170,38 @@ class MultiheadAttention(nn.Module):
 
         return x
 
-    def forward(self, query, key, value, padding_mask, attn_past_kv=None, attn_past_q=None):
+    def forward(self, query, key, value, padding_mask, past_key_value=None, past_query=None):
         qkv_same = (query.data_ptr() == key.data_ptr() == value.data_ptr())
         kv_same = (key.data_ptr() == value.data_ptr())
 
         if qkv_same:
             query, key, value = self.qkv_proj(query).split(self.n_features, dim=-1)
-            apply_future_mask = True  # self-attention
-            if attn_past_kv is not None:  # we have already computed part of key, value of this
-                past_key, past_value = attn_past_kv[0], attn_past_kv[1]
+            if past_key_value is not None:  # we have already computed part of key, value of this
+                past_key, past_value = past_key_value
                 key = torch.cat((past_key, key), dim=-2)
                 value = torch.cat((past_value, value), dim=-2)
+
+            apply_future_mask = self.future_mask  # self-attention
+
         elif kv_same:
-            if attn_past_q is not None:  # we have already computed this query
-                query = attn_past_q
+            if past_query is not None:  # we have already computed this query
+                query = past_query
             else:
                 q_w, q_b = self.qkv_proj.weight[:self.n_features, :], self.qkv_proj.bias[:self.n_features]
                 query = F.linear(query, q_w, q_b)
-            if attn_past_kv is not None:  # we have already computed key, value of this
-                key, value = attn_past_kv[0], attn_past_kv[1]
+
+            if past_key_value is not None:  # we have already computed key, value of this
+                key, value = past_key_value
             else:
                 kv_w, kv_b = self.qkv_proj.weight[self.n_features:, :], self.qkv_proj.bias[self.n_features:]
                 key, value = F.linear(key, kv_w, kv_b).split(self.n_features, dim=-1)
+
             apply_future_mask = False
         else:
             assert False
 
-        save_key_value = (key, value)
-        save_query = query
+        saved_key_value = (key, value)
+        saved_query = query
 
         query = self._split_heads(query)
         key = self._split_heads(key, is_key=True)
@@ -167,7 +212,7 @@ class MultiheadAttention(nn.Module):
 
         x = self.out_proj(x)
 
-        return x, save_key_value, save_query # we can reuse: key/value for next forward steps, query for next attention ops
+        return x, saved_key_value, saved_query  # we can reuse: key/value for next forward steps, query for next attention ops
 
 
 class FeedForward(nn.Module):
@@ -176,7 +221,7 @@ class FeedForward(nn.Module):
         return 0.5 * x * (1 + torch.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * torch.pow(x, 3))))
 
     def __init__(self, in_features, middle_features, dropout):
-        super(FeedForward, self).__init__()
+        super().__init__()
 
         self.layer_1 = nn.Linear(in_features, middle_features)
         self.layer_2 = nn.Linear(middle_features, in_features)
@@ -189,7 +234,8 @@ class FeedForward(nn.Module):
         nn.init.normal_(self.layer_2.weight, std=0.02)
 
     def forward(self, x):
-        x = FeedForward.gelu(self.layer_1(x))
+        x = self.layer_1(x)
+        x = FeedForward.gelu(x)
         x = self.dropout(x)
         x = self.layer_2(x)
 
@@ -200,146 +246,138 @@ class GatedResidual(nn.Module):
     """ A gated residual layer: see https://arxiv.org/abs/1810.03581
     """
     def __init__(self, in_features):
-        super(GatedResidual, self).__init__()
-        self.linear_input = nn.Linear(in_features, 1, bias=True)
-        self.linear_output = nn.Linear(in_features, 1, bias=True)
+        super().__init__()
+        self.linear_additional = nn.Linear(in_features, 1, bias=True)
+        self.linear_residual = nn.Linear(in_features, 1, bias=True)
         self._init_weights()
 
     def _init_weights(self):
-        nn.init.normal_(self.linear_input.weight, std=0.02)
-        nn.init.normal_(self.linear_output.weight, std=0.02)
+        nn.init.normal_(self.linear_additional.weight, std=0.02)
+        nn.init.normal_(self.linear_residual.weight, std=0.02)
 
-        self.linear_input.bias.data[:] = 5
-        self.linear_output.bias.data[:] = 0
+        self.linear_additional.bias.data[:] = 5
+        self.linear_residual.bias.data[:] = 0
 
-    def forward(self, module_input, module_output):
-        gate = torch.sigmoid(self.linear_input(module_input) + self.linear_output(module_output))
-        return gate * module_output + (1 - gate) * module_input
+    def forward(self, additional_x, residual_x):
+        gate = torch.sigmoid(self.linear_additional(additional_x) + self.linear_residual(residual_x))
+        return gate * residual_x + (1 - gate) * additional_x
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, n_features, n_heads, dropout, attn_dropout, ff_dropout,
-                 successive_attention=False, shared_attention=True, context_size=0):
-        super(TransformerBlock, self).__init__()
+    def __init__(self, n_features, n_heads, dropout=0, attn_dropout=0, ff_dropout=0, normalize_before=False,
+                 successive_attention=False, shared_attention=True, future_mask=True, context_size=0):
+        super().__init__()
 
-        if shared_attention:
-            context_size = 0
-
-        self.attn = MultiheadAttention(n_features, n_heads, attn_dropout)
+        self.attn = MultiheadAttention(n_features, n_heads, attn_dropout, future_mask)
+        self.context_attns = [self.attn if shared_attention else copy.deepcopy(self.attn) for _ in range(context_size)]
+        if not shared_attention:
+            self.context_attns = nn.ModuleList(self.context_attns)
+        self.gated_residual = GatedResidual(n_features) if successive_attention else None
         self.attn_norm = LayerNorm(n_features)
-        self.context_attns = nn.ModuleList([MultiheadAttention(n_features, n_heads, attn_dropout) for _ in range(context_size)])
         self.ff = FeedForward(n_features, 4 * n_features, ff_dropout)
         self.ff_norm = LayerNorm(n_features)
-        self.gated_res = GatedResidual(n_features) if successive_attention else None
         self.dropout = nn.Dropout(dropout)
-        self.shared_attention = shared_attention
-        self.successive_attention = successive_attention
+        self.normalize_before = normalize_before
 
-    def forward(self, x, padding_mask, *contexts, layer_past=None):
-        '''contexts = [(context1, padding_mask1), ...]'''
+    def _process_attn(self, x, padding_mask, contexts, layer_past):
+        residual = x
 
-        inputs = (x, padding_mask) + contexts
+        if self.normalize_before:
+            x = self.attn_norm(x)
 
+        inputs = [(x, padding_mask)] + contexts
         result_attns = []
-        save_kv = []
-        query = None
+        saved_kv, query = [], None
         if layer_past is None:
-            layer_past = [None] * (len(inputs) // 2)
+            layer_past = [None] * len(inputs)
 
-        for i, attn_past_kv in zip(range(0, len(inputs), 2), layer_past):
-            c, m = inputs[i], inputs[i+1].byte()
-
-            if self.shared_attention or i == 0:
-                attn = self.attn
-            else:
-                attn = self.context_attns[i // 2 - 1]
-
+        for i, attn_past_kv in zip(range(len(inputs)), layer_past):
+            c, m = inputs[i]
+            attn = self.attn if i == 0 else self.context_attns[i - 1]
             a, key_value, query = attn(x, c, c, m, attn_past_kv=attn_past_kv, attn_past_q=query)
-            save_kv.append(key_value)
+            
+            saved_kv.append(key_value)
             result_attns.append(a)
 
-        if self.successive_attention:
+        if self.gated_residual is not None:
             for i, a in enumerate(result_attns):
                 a = self.dropout(a)
-                x = a + x if i == 0 else self.gated_res(a, x)
+                x = residual + a if i == 0 else self.gated_residual(a, x)
         else:
             a = sum(result_attns, 0) / len(result_attns)
             a = self.dropout(a)
-            x = x + a
+            x = residual + a
 
-        x = self.attn_norm(x)
+        if not self.normalize_before:
+            x = self.attn_norm(x)
 
-        f = self.ff(x)
-        f = self.dropout(f)
-        x = self.ff_norm(x + f)
+        return x, saved_kv
 
-        return (x, padding_mask) + contexts + (save_kv,)
+    def _process_ff(self, x):
+        residual = x
+
+        if self.normalize_before:
+            x = self.ff_norm(x)
+
+        x = self.ff(x)
+        x = self.dropout(x)
+        x = residual + x
+
+        if not self.normalize_before:
+            x = self.ff_norm(x)
+
+        return x
+
+    def forward(self, x, padding_mask, contexts, layer_past=None):
+        # contexts = [(context1, padding_mask1), ...]
+        x, saved_kv = self._process_attn(x, padding_mask, contexts, layer_past)
+        x = self._process_ff(x)
+
+        return x, saved_kv
 
 
 class TransformerModule(nn.Module):
-    def __init__(self, n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
-                 padding_idx, n_heads, dropout, embed_dropout, attn_dropout, ff_dropout,
-                 normalize_embeddings, n_segments=None, constant_embedding=False,
-                 successive_attention=False, sparse_embeddings=False,
-                 shared_attention=True, context_size=0):
-        super(TransformerModule, self).__init__()
+    def __init__(self, n_layers, n_embeddings, n_pos_embeddings, embedding_dim, 
+                 padding_idx, n_heads, dropout=0, embedding_dropout=0, attn_dropout=0, ff_dropout=0,
+                 constant_pos_embedding=False, sparse_embedding=False, normalize_before=False,
+                 successive_attention=False, shared_attention=True, context_size=0):
+        super().__init__()
 
-        self._constant_embedding = constant_embedding
-
-        self.embeddings = nn.Embedding(n_embeddings, embeddings_size, padding_idx=padding_idx, sparse=sparse_embeddings)
-        if self._constant_embedding:
-            self.pos_embeddings = ConstantPositionalEmbedding(embeddings_size, padding_idx=0)
-        else:
-            self.pos_embeddings = nn.Embedding(n_pos_embeddings + 1, embeddings_size, padding_idx=0, sparse=sparse_embeddings)
-
-        self.embed_dropout = nn.Dropout(embed_dropout)
-        self.layers = nn.ModuleList([TransformerBlock(embeddings_size, n_heads, dropout, attn_dropout, ff_dropout,
-                                                      successive_attention, shared_attention, context_size)
-                                     for _ in range(n_layers)])
-        self.n_segments = n_segments
-        self.normalize_embeddings = normalize_embeddings
-
-        self._init_weights()
-
-    def _init_weights(self):
-        nn.init.normal_(self.embeddings.weight, std=0.02)
-        if isinstance(self.pos_embeddings, nn.Embedding):
-            nn.init.normal_(self.pos_embeddings.weight, std=0.02)
+        self.embedding = CombinedEmbedding(n_embeddings=n_embeddings,
+                                           n_pos_embeddings=n_pos_embeddings,
+                                           embedding_dim=embedding_dim,
+                                           padding_idx=padding_idx,
+                                           constant_pos_embedding=constant_pos_embedding,
+                                           sparse=sparse_embedding)
+        self.embedding_dropout = nn.Dropout(embedding_dropout)
+        base_block = TransformerBlock(n_features=embedding_dim,
+                                      n_heads=n_heads,
+                                      dropout=dropout,
+                                      attn_dropout=attn_dropout,
+                                      ff_dropout=ff_dropout,
+                                      normalize_before=normalize_before,
+                                      successive_attention=successive_attention,
+                                      shared_attention=shared_attention,
+                                      context_size=context_size)
+        self.layers = nn.ModuleList([copy.deepcopy(base_block) for _ in range(n_layers)])
+        self.final_norm = LayerNorm(embedding_dim) if normalize_before else lambda x: x
 
     def forward(self, x, enc_contexts=[], past=None):
-        # x.dim() == 3 if we have additional dialog embeddings else x.dim() == 2
-        if past is None: # past store previously computed keys/values for the current generated sentence
-            past_length = 0
-            past = [None] * len(self.layers)
+        # x.dim() == 3 if we have additional embeddings else x.dim() == 2
+
+        if past is None:  # past store previously computed keys/values for the current generated sequence
+            past_length, past = 0, [None] * len(self.layers)
         else:
             past_length = past[0][0][0].size(-2)  # layer 0, attn ops 0, key (0)
 
-        padding_mask = (x[:, :, 0] if x.dim() == 3 else x).eq(self.embeddings.padding_idx)
+        x, padding_mask = self.embedding(x, past_length)
+        x = self.embedding_dropout(x)
 
-        positions = torch.cumsum(~padding_mask, dim=-1, dtype=torch.long) + past_length
-        positions.masked_fill_(padding_mask, self.pos_embeddings.padding_idx)
+        saved_keys_values = []
+        for layer, layer_past in zip(self.layers, past):
+            x, saved_kv = layer(x, padding_mask, enc_contexts, layer_past=layer_past)
+            saved_keys_values.append(saved_kv)
 
-        x = self.embeddings(x)
-        if x.dim() == 4: # additional dialog embeddings
-            x = x.sum(dim=-2)
-        if self.normalize_embeddings:
-            x = x * math.sqrt(self.embeddings.embedding_dim)  # Used in pretrained last checkpoint for ConvAI2
+        x = self.final_norm(x)
 
-        x += self.pos_embeddings(positions)
-        x = self.embed_dropout(x)
-
-        enc_contexts = sum(enc_contexts, ())
-
-        if self.n_segments is not None:
-            padding_mask = padding_mask.float()  # fucking checkpoint_sequential
-            padding_mask.requires_grad_()  # fucking checkpoint_sequential
-            out = checkpoint_sequential(self.layers, self.n_segments, x, padding_mask, *enc_contexts)
-            x = out[0]
-        else:
-            save_key_values = []
-            for layer, layer_past in zip(self.layers, past):
-                out = layer(x, padding_mask, *enc_contexts, layer_past=layer_past)
-                x = out[0]
-                save_key_values.append(out[-1])
-
-        return x, padding_mask, save_key_values
+        return x, padding_mask, saved_keys_values
