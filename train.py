@@ -156,8 +156,7 @@ def main():
                             device=device,
                             ignore_idxs=vocab.special_tokens_ids,
                             local_rank=args.local_rank,
-                            fp16=trainer_config.fp16,
-                            loss_scale=trainer_config.loss_scale,
+                            apex_level=trainer_config.apex_level,
                             linear_schedule=trainer_config.linear_schedule,
                             n_epochs=trainer_config.n_epochs,
                             evaluate_full_sequences=trainer_config.evaluate_full_sequences)

@@ -71,8 +71,7 @@ def get_trainer_config():
                        'zero_shot': env_config('ZERO_SHOT', default=False, cast=bool),
                        'persona_augment': env_config('PERSONA_AUGMENT', default=False, cast=bool),
                        'persona_aug_syn_proba': env_config('PERSONA_AUG_SYN_PROBA', default=0.0, cast=float),
-                       'fp16': env_config('FP16', default=False, cast=bool),
-                       'loss_scale': env_config('LOSS_SCALE', default=0, cast=float),
+                       'apex_level': env_config('APEX_LEVEL', default=None, cast=str), # 'O0', 'O1', 'O2', 'O3'
                        'linear_schedule': env_config('LINEAR_SCHEDULE', default=True, cast=bool),
                        'evaluate_full_sequences': env_config('EVALUATE_FULL_SEQUENCES', default=True, cast=bool),
                        'limit_eval_size': env_config('LIMIT_EVAL_TIME', default=-1, cast=int),
@@ -91,6 +90,9 @@ def get_trainer_config():
                        'train_datasets_cache': 'train_cache.bin',
                        'test_datasets': env_config('TEST_DATASETS', default='datasets/ConvAI2/valid_self_original.txt', cast=Csv(str)),
                        'test_datasets_cache': 'test_cache.bin'})
+
+    if config.apex_level == 'None':
+        config.apex_level = None
 
     local_config = deepcopy(config)
     local_config.train_batch_size = 2
