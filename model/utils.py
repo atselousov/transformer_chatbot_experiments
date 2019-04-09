@@ -50,7 +50,9 @@ def repeat_along_dim1(obj, repetitions):
         return tuple(repeat_along_dim1(o, repetitions) for o in obj)
     if isinstance(obj, list):
         return list(repeat_along_dim1(o, repetitions) for o in obj)
-    return obj.repeat([repetitions] + [1] * len(obj.shape[1:]))
+
+    obj = obj.unsqueeze(1).repeat([1, repetitions] + [1] * len(obj.size()[1:]))
+    return obj.view(-1, *obj.size()[2:])
 
 
 def pad_sequence(sequences, batch_first=False, padding_value=0, left=False):

@@ -254,7 +254,8 @@ class Trainer:
 
         if self.single_input:
             start = beam_starts.size(1)
-            beam_starts = beam_starts.repeat([1, self.model.beam_size] + [1] * len(beam_starts.size()[1:]))
+            beam_starts.unsqueeze_(1)
+            beam_starts = beam_starts.repeat([1, self.model.beam_size] + [1] * len(beam_starts.size()[2:])) # tail_dims for dialog_embeddings
             beams = torch.cat((beam_starts, beams), dim=2)
 
         batch_probas = []
