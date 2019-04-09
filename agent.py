@@ -208,7 +208,7 @@ class TransformerAgent(Agent):
             if not self.use_cuda:
                 return data
 
-            if isinstance(data, (list, tuple)):
+            if isinstance(data, (list, tuple, map)):
                 return list(map(lambda x: x.cuda(), data))
 
             return data.cuda()
