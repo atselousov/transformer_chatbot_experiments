@@ -40,11 +40,16 @@ def get_model_config():
                        'shared_attention': env_config('SHARED_ATTENTION', default=True, cast=bool),
                        'dialog_embeddings': env_config('DIALOG_EMBEDDINGS', default=True, cast=bool),
                        'single_input': env_config('SINGLE_INPUT', default=False, cast=bool),
-                       'use_start_end': env_config('USE_START_END', default=False, cast=bool)})
+                       'use_start_end': env_config('USE_START_END', default=False, cast=bool),
+                       'apex_level': env_config('APEX_LEVEL', default=None, cast=str),  # 'O0', 'O1', 'O2', 'O3'
+                       })
     if config.annealing_topk == 'None':
         config.annealing_topk = None
     if config.annealing_topk is not None:
         config.annealing_topk = int(config.annealing_topk)
+    if config.apex_level == 'None':
+        config.apex_level = None
+
     return config
 
 
@@ -71,7 +76,6 @@ def get_trainer_config():
                        'zero_shot': env_config('ZERO_SHOT', default=False, cast=bool),
                        'persona_augment': env_config('PERSONA_AUGMENT', default=False, cast=bool),
                        'persona_aug_syn_proba': env_config('PERSONA_AUG_SYN_PROBA', default=0.0, cast=float),
-                       'apex_level': env_config('APEX_LEVEL', default=None, cast=str), # 'O0', 'O1', 'O2', 'O3'
                        'apex_loss_scale': env_config('APEX_LOSS_SCALE', default=None, cast=str), # e.g. '128', 'dynamic'
                        'linear_schedule': env_config('LINEAR_SCHEDULE', default=True, cast=bool),
                        'evaluate_full_sequences': env_config('EVALUATE_FULL_SEQUENCES', default=True, cast=bool),
@@ -90,10 +94,8 @@ def get_trainer_config():
                        'train_datasets': env_config('TRAIN_DATASETS', default='datasets/ConvAI2/train_self_original.txt', cast=Csv(str)),
                        'train_datasets_cache': 'train_cache.bin',
                        'test_datasets': env_config('TEST_DATASETS', default='datasets/ConvAI2/valid_self_original.txt', cast=Csv(str)),
-                       'test_datasets_cache': 'test_cache.bin'})
-
-    if config.apex_level == 'None':
-        config.apex_level = None
+                       'test_datasets_cache': 'test_cache.bin'
+                       })
 
     if config.apex_loss_scale == 'None':
         config.apex_loss_scale = None

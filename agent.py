@@ -55,6 +55,7 @@ class TransformerAgent(Agent):
         self.dialog_embeddings = model_config.dialog_embeddings
         self.use_start_end = model_config.use_start_end
         self.single_input = model_config.single_input
+        self.apex_level = model_config.apex_level
 
         # 'max_seq_len': 128,
         # 'beam_size': 1,
@@ -118,6 +119,15 @@ class TransformerAgent(Agent):
                 self.model = self.model.cuda()
 
             self.model.eval()
+
+            if self.apex_level is not None:
+                assert self.apex_level == 'O0' or self.model.sparse_embeddings == False, 'Apex doesn\'t support sparse tensors'
+                try:
+                    from apex.amp import initialize
+                except ImportError:
+                    raise ImportError("Please install apex.")
+
+                self.model = initialize(self.model, opt_level=self.apex_level)
 
         else:
             self.model = shared['model']

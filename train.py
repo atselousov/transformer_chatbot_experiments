@@ -156,7 +156,7 @@ def main():
                             device=device,
                             ignore_idxs=vocab.special_tokens_ids,
                             local_rank=args.local_rank,
-                            apex_level=trainer_config.apex_level,
+                            apex_level=model_config.apex_level,
                             apex_loss_scale=trainer_config.apex_loss_scale,
                             linear_schedule=trainer_config.linear_schedule,
                             n_epochs=trainer_config.n_epochs,
