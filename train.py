@@ -1,19 +1,21 @@
-import os
-import torch
-import random
-import logging
 import argparse
 import json
+import logging
+import os
+import random
 import sys
-from tensorboardX import SummaryWriter
 
-from model.utils import load_openai_weights, set_seed, f1_score, open, unicode
-from model.transformer_model import TransformerModel
-from model.trainer import Trainer
-from model.text import BPEVocab
-from model.dataset import FacebookDataset
+from tensorboardX import SummaryWriter
+import torch
+
 from config import get_model_config, get_trainer_config
-from metrics import nlp_metrics
+from metrics import nlp_metrics, specified_nlp_metric
+from model.dataset import FacebookDataset
+from model.text import BPEVocab
+from model.trainer import Trainer
+from model.transformer_model import TransformerModel
+from model.utils import f1_score, load_openai_weights, open, set_seed, unicode
+
 
 class DummyWriter:
     """ Used for distributed training (from NVIDIA apex example).
@@ -21,8 +23,10 @@ class DummyWriter:
     """
     def __init__(self, *input, **kwargs):
         self.log_dir = "runs/dummy_logs/"
+
     def add_scalar(self, *input, **kwargs):
         pass
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -163,15 +167,17 @@ def main():
         model_trainer.load_state_dict(state_dict)
         logger.info('Weights loaded from {}'.format(trainer_config.load_last))
 
-
     # helpers -----------------------------------------------------
-    def external_metrics_func(full_references, full_predictions, epoch):
+    def external_metrics_func(full_references, full_predictions, epoch, metric=None):
         references_file_path = os.path.join(writer.log_dir, trainer_config.eval_references_file + "_{}".format(epoch))
         predictions_file_path = os.path.join(writer.log_dir, trainer_config.eval_predictions_file + "_{}".format(epoch))
         with open(references_file_path, 'w', encoding='utf-8') as f:
             f.write(unicode('\n'.join(full_references)))
         with open(predictions_file_path, 'w', encoding='utf-8') as f:
             f.write(unicode('\n'.join(full_predictions)))
+
+        if metric is not None:
+            return specified_nlp_metric([references_file_path], predictions_file_path, metric)
 
         nist, bleu, meteor, entropy, div, avg_len = nlp_metrics([references_file_path], predictions_file_path)
 
@@ -215,7 +221,8 @@ def main():
 
     def f1_risk(predictions, targets):
         scores = f1_score(predictions, targets, average=False)
-        return [-s for s in scores]
+        assert all([0 <= s <= 1.0 for s in scores])
+        return [1 - s for s in scores]
 
     def get_risk_metric_func(risk_metric):
         """ risk_metric selected in:
@@ -224,15 +231,21 @@ def main():
         def external_metric_risk(predictions, targets):
             string_targets = list(vocab.ids2string(t) for t in targets)
             string_predictions = list(vocab.ids2string(t) for t in predictions)
-            metrics = [external_metrics_func([t], [p], epoch=-1)[risk_metric] for p, t in zip(string_predictions, string_targets)]
-            return [-m for m in metrics]
+            metrics = [external_metrics_func([t], [p], epoch=-1, metric=risk_metric) for p, t in zip(string_predictions, string_targets)]
+
+            if any([s in risk_metric for s in ['entropy', 'nist', 'avg_len']]):
+                return [-m for m in metrics]
+
+            assert all([0 <= s <= 1.0 for s in metrics]), metrics
+
+            return [1 - m for m in metrics]
 
         if risk_metric == 'f1':
             return f1_risk
+
         return external_metric_risk
 
     # helpers -----------------------------------------------------
-
 
     try:
         model_trainer.train(after_epoch_funcs=[save_func, sample_text_func, test_func],

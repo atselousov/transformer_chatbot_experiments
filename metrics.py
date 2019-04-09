@@ -17,18 +17,29 @@ if py_version == '2':
 else:
     unicode = str
 
+
 def makedirs(fld):
     if not os.path.exists(fld):
         os.makedirs(fld)
 
+
 def str2bool(s):
     # to avoid issue like this: https://stackoverflow.com/questions/15008758/parsing-boolean-values-with-argparse
-    if s.lower() in ['t','true','1','y']:
+    if s.lower() in ['t', 'true', '1', 'y']:
         return True
-    elif s.lower() in ['f','false','0','n']:
+    elif s.lower() in ['f', 'false', '0', 'n']:
         return False
     else:
         raise ValueError
+
+
+def calc_nist(path_refs, path_hyp, fld_out='temp', n_lines=None):
+    return calc_nist_bleu(path_refs, path_hyp, fld_out, n_lines)[0]
+
+
+def calc_bleu(path_refs, path_hyp, fld_out='temp', n_lines=None):
+    return calc_nist_bleu(path_refs, path_hyp, fld_out, n_lines)[1]
+
 
 def calc_nist_bleu(path_refs, path_hyp, fld_out='temp', n_lines=None):
     # call mteval-v14c.pl
@@ -65,8 +76,6 @@ def calc_nist_bleu(path_refs, path_hyp, fld_out='temp', n_lines=None):
         print(output.decode())
         print(error.decode())
         return [-1]*4, [-1]*4
-
-
 
 
 def calc_cum_bleu(path_refs, path_hyp):
@@ -141,7 +150,7 @@ def calc_entropy(path_hyp, n_lines=None):
     return etp_score
 
 
-def calc_len(path, n_lines):
+def calc_avg_len(path, n_lines=None):
     l = []
     for line in open(path, encoding='utf8'):
         l.append(len(line.strip('\n').split()))
@@ -150,9 +159,9 @@ def calc_len(path, n_lines):
     return np.mean(l)
 
 
-def calc_diversity(path_hyp):
-    tokens = [0.0,0.0]
-    types = [defaultdict(int),defaultdict(int)]
+def calc_div(path_hyp):
+    tokens = [0.0, 0.0]
+    types = [defaultdict(int), defaultdict(int)]
     for line in open(path_hyp, encoding='utf-8'):
         words = line.strip('\n').split()
         for n in range(2):
@@ -169,9 +178,25 @@ def nlp_metrics(path_refs, path_hyp, fld_out='temp',  n_lines=None):
     nist, bleu = calc_nist_bleu(path_refs, path_hyp, fld_out, n_lines)
     meteor = calc_meteor(path_refs, path_hyp, fld_out, n_lines)
     entropy = calc_entropy(path_hyp, n_lines)
-    div = calc_diversity(path_hyp)
-    avg_len = calc_len(path_hyp, n_lines)
+    div = calc_div(path_hyp)
+    avg_len = calc_avg_len(path_hyp, n_lines)
+
     return nist, bleu, meteor, entropy, div, avg_len
+
+
+def specified_nlp_metric(path_refs, path_hyp, metric):
+    i = None
+
+    m = re.search('_[\d]\Z', metric)
+    if m:
+        metric, i = metric[:m.span()[0]], int(metric[m.span()[0]+1:]) - 1
+
+    try:
+        res = eval(f'calc_{metric}(path_refs, path_hyp)')
+    except:
+        res = eval(f'calc_{metric}(path_hyp)')
+
+    return res if i is None else res[i]
 
 
 def _write_merged_refs(paths_in, path_out, n_lines=None):
@@ -186,7 +211,6 @@ def _write_merged_refs(paths_in, path_out, n_lines=None):
         for j in range(len(lines[0])):
             for i in range(len(paths_in)):
                 f.write(unicode(lines[i][j]) + "\n")
-
 
 
 def _write_xml(paths_in, path_out, role, n_lines=None):
