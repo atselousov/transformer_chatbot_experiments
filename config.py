@@ -72,6 +72,7 @@ def get_trainer_config():
                        'persona_augment': env_config('PERSONA_AUGMENT', default=False, cast=bool),
                        'persona_aug_syn_proba': env_config('PERSONA_AUG_SYN_PROBA', default=0.0, cast=float),
                        'apex_level': env_config('APEX_LEVEL', default=None, cast=str), # 'O0', 'O1', 'O2', 'O3'
+                       'apex_loss_scale': env_config('APEX_LOSS_SCALE', default=None, cast=str), # e.g. '128', 'dynamic'
                        'linear_schedule': env_config('LINEAR_SCHEDULE', default=True, cast=bool),
                        'evaluate_full_sequences': env_config('EVALUATE_FULL_SEQUENCES', default=True, cast=bool),
                        'limit_eval_size': env_config('LIMIT_EVAL_TIME', default=-1, cast=int),
@@ -93,6 +94,9 @@ def get_trainer_config():
 
     if config.apex_level == 'None':
         config.apex_level = None
+
+    if config.apex_loss_scale == 'None':
+        config.apex_loss_scale = None
 
     local_config = deepcopy(config)
     local_config.train_batch_size = 2

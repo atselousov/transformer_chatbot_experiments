@@ -37,7 +37,7 @@ class Trainer:
     def __init__(self, model, train_dataset, writer=SummaryWriter(), test_dataset=None, train_batch_size=8, test_batch_size=8,
                  batch_split=1, s2s_weight=1, lm_weight=0.5, risk_weight=0, hits_weight=0, lr=6.25e-5, lr_warmup=2000,
                  n_jobs=0, clip_grad=None, label_smoothing=0, device=torch.device('cuda'), weight_decay=0.1,
-                 ignore_idxs=[], local_rank=-1, apex_level=None,
+                 ignore_idxs=[], local_rank=-1, apex_level=None, apex_loss_scale=None,
                  linear_schedule=False, n_epochs=0, single_input=False, evaluate_full_sequences=False):
         if local_rank != -1:
             torch.cuda.set_device(local_rank)
@@ -69,7 +69,8 @@ class Trainer:
             except ImportError:
                 raise ImportError("Please install apex.")
 
-            self.model, base_optimizer = initialize(self.model, base_optimizer, opt_level=apex_level)
+            self.model, base_optimizer = initialize(self.model, base_optimizer, opt_level=apex_level,
+                                                    loss_scale=apex_loss_scale)
 
         if local_rank != -1:
             try:
