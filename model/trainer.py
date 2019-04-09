@@ -45,8 +45,8 @@ class Trainer:
             torch.distributed.init_process_group(backend='nccl',
                                                  init_method='env://')
         n_gpu = torch.cuda.device_count()
-        logger.info("device: {}, distributed training: {}, apex_level: {}, n_gpu: {}".format(
-            device, bool(local_rank != -1), apex_level, n_gpu))
+        logger.info("device: {}, distributed training: {}, apex_level: {}, apex_scale_loss: {},  n_gpu: {}".format(
+            device, bool(local_rank != -1), apex_level, apex_loss_scale, n_gpu))
 
         self.model = model.to(device)
 
@@ -63,7 +63,7 @@ class Trainer:
 
         base_optimizer = Adam(optimizer_grouped_parameters, lr=lr)
         if apex_level is not None:
-            assert apex_level == 'O0' or self.model.sparse_embeddings == False, 'APEX doesn\'t support sparse tensors'
+            assert apex_level == 'O0' or self.model.sparse_embeddings == False, 'Apex doesn\'t support sparse tensors'
             try:
                 from apex.amp import initialize
             except ImportError:
@@ -80,6 +80,7 @@ class Trainer:
 
             self.model = DistributedDataParallel(self.model)
         elif (n_gpu > 1) and (batch_split % n_gpu == 0) and (batch_split > n_gpu):
+            assert apex_level is None, 'Apex doesn\'t support torch.DataParallel?'
             self.model = nn.DataParallel(self.model)
             batch_split = batch_split // n_gpu
 
