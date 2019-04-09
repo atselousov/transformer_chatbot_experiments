@@ -204,27 +204,26 @@ class Trainer:
                else self.lm_criterion(outputs, nexts)
         return loss, hidden_state, padding_mask
 
-    def _hist_loss(self, distractors, hidden_state, padding_mask, enc_contexts, negative_samples):
+    def _hist(self, distractors, hidden_state, padding_mask, enc_contexts, negative_samples):
         batch_hits_loss = torch.tensor(0, dtype=torch.float, device=self.device)
 
-        if not (self.hits_weight > 0 and negative_samples > 0 and self.model.multiple_choice_head is not None):
+        if self.hits_weight == 0 or negative_samples == 0 or self.model.multiple_choice_head is None:
             return batch_hits_loss
 
-        if self.hits_weight > 0 and negative_samples > 0 and self.model.multiple_choice_head is not None:
-            extended_contexts = repeat_along_dim1(enc_contexts, negative_samples)
-            neg_logits = self.model.decode_classify(distractors, extended_contexts)
-            true_logits = self.model.classify(hidden_state, padding_mask)
-            clf_logits = torch.cat((true_logits.view(-1, 1), neg_logits.view(-1, negative_samples)), dim=1)
-            clf_labels = torch.tensor([0] * len(true_logits), dtype=torch.long, device=self.device)
+        extended_contexts = repeat_along_dim1(enc_contexts, negative_samples)
+        neg_logits = self.model.decode_classify(distractors, extended_contexts)
+        true_logits = self.model.classify(hidden_state, padding_mask)
+        clf_logits = torch.cat((true_logits.view(-1, 1), neg_logits.view(-1, negative_samples)), dim=1)
+        clf_labels = torch.tensor([0] * len(true_logits), dtype=torch.long, device=self.device)
 
-            batch_hits_loss = self.hits_criterion(clf_logits.float(), clf_labels) if self.model.training else \
-                              torch.sum(torch.max(clf_logits, dim=1)[1] == clf_labels).float() / clf_labels.shape[0]
+        batch_hits_loss = self.hits_criterion(clf_logits.float(), clf_labels) if self.model.training else \
+                          torch.sum(torch.max(clf_logits, dim=1)[1] == clf_labels).float() / clf_labels.shape[0]
 
         return batch_hits_loss
 
     def _risk_loss(self, contexts, targets, enc_contexts, risk_func):
 
-        if not (risk_func is not None and self.risk_weight > 0):
+        if risk_func is None or self.risk_weight == 0:
             return torch.tensor(0, dtype=torch.float, device=self.device)
 
         self.model.eval()  # desactivate dropout
@@ -302,7 +301,7 @@ class Trainer:
             batch_s2s_loss, hidden_state, padding_mask = self._s2s_loss(targets, enc_contexts, negative_samples)
 
             # hits@1 loss on distractors and targets
-            batch_hits_loss = self._hist_loss(distractors, hidden_state, padding_mask, enc_contexts, negative_samples)
+            batch_hits_loss = self._hist(distractors, hidden_state, padding_mask, enc_contexts, negative_samples)
 
             # risk loss
             batch_risk_loss = self._risk_loss(contexts, targets, enc_contexts, risk_func)
@@ -362,8 +361,8 @@ class Trainer:
                 metrics['s2s_loss'] = (metrics['s2s_loss'] * i + batch_s2s_loss.item()) / (i + 1)
 
                 # hits@1 loss on distractors and targets
-                batch_hits_acc = self._hist_loss(distractors, hidden_state, padding_mask,
-                                                 enc_contexts, negative_samples)
+                batch_hits_acc = self._hist(distractors, hidden_state, padding_mask,
+                                            enc_contexts, negative_samples)
                 metrics['hits_acc'] = (metrics['hits_acc'] * i + batch_hits_acc.item()) / (i + 1)
 
                 # full sequence loss
@@ -373,7 +372,7 @@ class Trainer:
                                                    left=True)
                         predictions = self.model.beam_search(beam_starts=beam_starts)
                     else:
-                        predictions = self.model.beam_search(enc_contexts=enc_contexts, beam_starts=torch.cat(contexts, dim=1) if self.single_input else None)
+                        predictions = self.model.beam_search(enc_contexts=enc_contexts)
                     labels = targets if targets.dim() == 2 else targets[:, :, 0]
                     labels_lens = labels.ne(self.model.padding_idx).sum(dim=-1)
                     labels_start = [context.shape[0] + 1 for context in contexts] if self.single_input else [1] * len(targets)
