@@ -29,6 +29,8 @@ from tqdm import tqdm
 from .loss import LabelSmoothingLoss
 from .optim import Adam, NoamOpt
 from .utils import pad_sequence, repeat_along_dim1
+from .transformer_model import apex_model
+
 
 logger = logging.getLogger(__file__)
 
@@ -62,15 +64,8 @@ class Trainer:
             ]
 
         base_optimizer = Adam(optimizer_grouped_parameters, lr=lr)
-        if apex_level is not None:
-            assert apex_level == 'O0' or self.model.sparse_embeddings == False, 'Apex doesn\'t support sparse tensors'
-            try:
-                from apex.amp import initialize
-            except ImportError:
-                raise ImportError("Please install apex.")
-
-            self.model, base_optimizer = initialize(self.model, base_optimizer, opt_level=apex_level,
-                                                    loss_scale=apex_loss_scale)
+        self.model, base_optimizer = apex_model(self.model, optimizer=base_optimizer,
+                                                apex_level=apex_level, apex_loss_scale=apex_loss_scale)
 
         if local_rank != -1:
             try:

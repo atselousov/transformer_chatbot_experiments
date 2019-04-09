@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 from config import get_model_config
 from model.text import BPEVocab
-from model.transformer_model import TransformerModel
+from model.transformer_model import TransformerModel, apex_model
 from model.utils import pad_sequence
 from parlai.core.agents import Agent
 
@@ -120,14 +120,7 @@ class TransformerAgent(Agent):
 
             self.model.eval()
 
-            if self.apex_level is not None:
-                assert self.apex_level == 'O0' or self.model.sparse_embeddings == False, 'Apex doesn\'t support sparse tensors'
-                try:
-                    from apex.amp import initialize
-                except ImportError:
-                    raise ImportError("Please install apex.")
-
-                self.model = initialize(self.model, opt_level=self.apex_level)
+            self.model = apex_model(self.model, apex_level=self.apex_level)
 
         else:
             self.model = shared['model']
