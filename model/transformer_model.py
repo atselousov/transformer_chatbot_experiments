@@ -27,6 +27,20 @@ from .utils import repeat_along_dim1
 logger = logging.getLogger(__file__)
 
 
+def apex_model(model, *, apex_level=None, optimizer=None, apex_loss_scale=None):
+    if apex_level is not None:
+        assert apex_level == 'O0' or model.sparse_embeddings == False, 'Apex doesn\'t support sparse tensors'
+
+        try:
+            from apex.amp import initialize
+        except ImportError:
+            raise ImportError("Please install apex.")
+
+        return initialize(model, optimizer, opt_level=apex_level, loss_scale=apex_loss_scale)
+
+    return model if optimizer is None else (model, optimizer)
+
+
 class MultipleChoiceHead(nn.Module):
     """ Classifier Head for the transformer """
 

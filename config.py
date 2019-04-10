@@ -10,6 +10,10 @@ from decouple import Csv
 repo = git.Repo(search_parent_directories=True)
 
 
+def cast2(type_):
+    return lambda val: val if val is None else type_(val)
+
+
 def get_model_config():
     default_config = openai_transformer_config()
     config = AttrDict({'bpe_vocab_path': './parameters/bpe.vocab',
@@ -28,7 +32,7 @@ def get_model_config():
                        'beam_size': env_config('BEAM_SIZE', default=3, cast=int),
                        'diversity_coef': env_config('DIVERSITY_COEF', default=0, cast=int),
                        'diversity_groups': env_config('DIVERSITY_GROUP', default=1, cast=int),
-                       'annealing_topk': env_config('ANNEALING_TOPK', default=None),
+                       'annealing_topk': env_config('ANNEALING_TOPK', default=None, cast=cast2(int)),
                        'annealing': env_config('ANNEALING', default=0, cast=float),
                        'length_penalty': env_config('LENGTH_PENALTY', default=0.6, cast=float),
                        'n_segments': None,
@@ -40,11 +44,10 @@ def get_model_config():
                        'shared_attention': env_config('SHARED_ATTENTION', default=True, cast=bool),
                        'dialog_embeddings': env_config('DIALOG_EMBEDDINGS', default=True, cast=bool),
                        'single_input': env_config('SINGLE_INPUT', default=False, cast=bool),
-                       'use_start_end': env_config('USE_START_END', default=False, cast=bool)})
-    if config.annealing_topk == 'None':
-        config.annealing_topk = None
-    if config.annealing_topk is not None:
-        config.annealing_topk = int(config.annealing_topk)
+                       'use_start_end': env_config('USE_START_END', default=False, cast=bool),
+                       'apex_level': env_config('APEX_LEVEL', default=None, cast=cast2(str)),  # 'O0', 'O1', 'O2', 'O3'
+                       })
+
     return config
 
 
@@ -71,8 +74,7 @@ def get_trainer_config():
                        'zero_shot': env_config('ZERO_SHOT', default=False, cast=bool),
                        'persona_augment': env_config('PERSONA_AUGMENT', default=False, cast=bool),
                        'persona_aug_syn_proba': env_config('PERSONA_AUG_SYN_PROBA', default=0.0, cast=float),
-                       'fp16': env_config('FP16', default=False, cast=bool),
-                       'loss_scale': env_config('LOSS_SCALE', default=0, cast=float),
+                       'apex_loss_scale': env_config('APEX_LOSS_SCALE', default=None, cast=cast2(str)), # e.g. '128', 'dynamic'
                        'linear_schedule': env_config('LINEAR_SCHEDULE', default=True, cast=bool),
                        'evaluate_full_sequences': env_config('EVALUATE_FULL_SEQUENCES', default=True, cast=bool),
                        'limit_eval_size': env_config('LIMIT_EVAL_TIME', default=-1, cast=int),
@@ -90,7 +92,8 @@ def get_trainer_config():
                        'train_datasets': env_config('TRAIN_DATASETS', default='datasets/ConvAI2/train_self_original.txt', cast=Csv(str)),
                        'train_datasets_cache': 'train_cache.bin',
                        'test_datasets': env_config('TEST_DATASETS', default='datasets/ConvAI2/valid_self_original.txt', cast=Csv(str)),
-                       'test_datasets_cache': 'test_cache.bin'})
+                       'test_datasets_cache': 'test_cache.bin'
+                       })
 
     local_config = deepcopy(config)
     local_config.train_batch_size = 2

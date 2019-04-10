@@ -29,6 +29,8 @@ from tqdm import tqdm
 from .loss import LabelSmoothingLoss
 from .optim import Adam, NoamOpt
 from .utils import pad_sequence, repeat_along_dim1
+from .transformer_model import apex_model
+
 
 logger = logging.getLogger(__file__)
 
@@ -37,7 +39,7 @@ class Trainer:
     def __init__(self, model, train_dataset, writer=SummaryWriter(), test_dataset=None, train_batch_size=8, test_batch_size=8,
                  batch_split=1, s2s_weight=1, lm_weight=0.5, risk_weight=0, hits_weight=0, lr=6.25e-5, lr_warmup=2000,
                  n_jobs=0, clip_grad=None, label_smoothing=0, device=torch.device('cuda'), weight_decay=0.1,
-                 ignore_idxs=[], local_rank=-1, fp16=False, loss_scale=0,
+                 ignore_idxs=[], local_rank=-1, apex_level=None, apex_loss_scale=None,
                  linear_schedule=False, n_epochs=0, single_input=False, evaluate_full_sequences=False):
         if local_rank != -1:
             torch.cuda.set_device(local_rank)
@@ -45,23 +47,10 @@ class Trainer:
             torch.distributed.init_process_group(backend='nccl',
                                                  init_method='env://')
         n_gpu = torch.cuda.device_count()
-        logger.info("device: {}, distributed training: {}, 16-bits training: {}, n_gpu: {}".format(
-            device, bool(local_rank != -1), fp16, n_gpu))
+        logger.info("device: {}, distributed training: {}, apex_level: {}, apex_scale_loss: {},  n_gpu: {}".format(
+            device, bool(local_rank != -1), apex_level, apex_loss_scale, n_gpu))
 
         self.model = model.to(device)
-        if fp16:
-            self.model.half()
-
-        if local_rank != -1:
-            try:
-                from apex.parallel import DistributedDataParallel
-                self.model = DistributedDataParallel(self.model)
-            except ImportError:
-                raise ImportError("Please install apex for distributed training.")
-            # self.model = nn.parallel.DistributedDataParallel(self.model, device_ids=[device], output_device=device)
-        elif n_gpu > 1 and batch_split % n_gpu == 0 and batch_split > n_gpu:
-            self.model.transformer_module = nn.DataParallel(self.model.transformer_module)
-            batch_split = batch_split // n_gpu
 
         self.lm_criterion = nn.CrossEntropyLoss(ignore_index=self.model.padding_idx).to(device)
         self.hits_criterion = nn.CrossEntropyLoss().to(device)
@@ -75,28 +64,30 @@ class Trainer:
             ]
 
         base_optimizer = Adam(optimizer_grouped_parameters, lr=lr)
-        if fp16:
-            assert self.model.sparse_embeddings == False
+        self.model, base_optimizer = apex_model(self.model, optimizer=base_optimizer,
+                                                apex_level=apex_level, apex_loss_scale=apex_loss_scale)
 
+        if local_rank != -1:
             try:
-                from apex.optimizers import FP16_Optimizer
-                from apex.optimizers import FusedAdam
+                from apex.parallel import DistributedDataParallel
             except ImportError:
-                raise ImportError("Please install apex for fp16.")
+                raise ImportError("Please install apex for distributed training.")
 
-            base_optimizer = FusedAdam(optimizer_grouped_parameters, lr=lr, bias_correction=False)
-            if loss_scale == 0:
-                base_optimizer = FP16_Optimizer(base_optimizer, dynamic_loss_scale=True)
-            else:
-                base_optimizer = FP16_Optimizer(base_optimizer, static_loss_scale=loss_scale)
+            self.model = DistributedDataParallel(self.model)
+        elif (n_gpu > 1) and (batch_split % n_gpu == 0) and (batch_split > n_gpu):
+            assert apex_level is None, 'Apex doesn\'t support torch.DataParallel?'
+            self.model = nn.DataParallel(self.model)
+            batch_split = batch_split // n_gpu
+
         if not linear_schedule:
-            self.optimizer = NoamOpt(self.model.embeddings_size, lr_warmup, base_optimizer, lr=lr, linear_schedule=False, fp16=fp16)
+            self.optimizer = NoamOpt(self.model.embeddings_size, lr_warmup, base_optimizer, lr=lr,
+                                     linear_schedule=False, apex_level=apex_level)
         else:
             total_steps = len(train_dataset) * n_epochs // train_batch_size
             if local_rank != -1:
                 total_steps = total_steps // torch.distributed.get_world_size()
             self.optimizer = NoamOpt(self.model.embeddings_size, lr_warmup, base_optimizer, linear_schedule=True,
-            lr=lr, total_steps=total_steps, fp16=fp16)
+                                     lr=lr, total_steps=total_steps, apex_level=apex_level)
 
         if local_rank == -1:
             train_sampler = RandomSampler(train_dataset)
@@ -119,7 +110,7 @@ class Trainer:
         self.clip_grad = clip_grad
         self.device = device
         self.ignore_idxs = ignore_idxs
-        self.fp16 = fp16
+        self.apex_level = apex_level
         self.n_epochs = n_epochs
         self.single_input = single_input
         self.evaluate_full_sequences = evaluate_full_sequences

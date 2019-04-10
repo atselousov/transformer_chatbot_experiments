@@ -21,6 +21,7 @@ import torch
 
 logger = logging.getLogger(__file__)
 
+
 class Adam(torch.optim.Optimizer):
     """Implements Adam algorithm.
     This implementation is modified from torch.optim.Adam based on:
@@ -147,12 +148,12 @@ class Adam(torch.optim.Optimizer):
 
 
 class NoamOpt:
-    def __init__(self, embeddings_size, warmup, optimizer, linear_schedule=False, lr=None, total_steps=None, fp16=False):
+    def __init__(self, embeddings_size, warmup, optimizer, linear_schedule=False, lr=None, total_steps=None, apex_level=None):
         self.embeddings_size = embeddings_size
         self.warmup = warmup
         self.optimizer = optimizer
         self.linear_schedule = linear_schedule
-        self.fp16 = fp16
+        self.apex_level = apex_level
         self.lr = lr
         self.total_steps = total_steps
 
@@ -172,8 +173,14 @@ class NoamOpt:
             logger.info("Optimizer cannot be loaded from checkpoint: {}".format(e))
 
     def backward(self, loss):
-        if self.fp16:
-            self.optimizer.backward(loss)
+        if self.apex_level is not None:
+            try:
+                from apex.amp import scale_loss
+            except ImportError:
+                raise ImportError("Please install apex.")
+
+            with scale_loss(loss, self.optimizer) as scaled_loss:
+                scaled_loss.backward()
         else:
             loss.backward()
 

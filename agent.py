@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 from config import get_model_config
 from model.text import BPEVocab
-from model.transformer_model import TransformerModel
+from model.transformer_model import TransformerModel, apex_model
 from model.utils import pad_sequence
 from parlai.core.agents import Agent
 
@@ -55,6 +55,7 @@ class TransformerAgent(Agent):
         self.dialog_embeddings = model_config.dialog_embeddings
         self.use_start_end = model_config.use_start_end
         self.single_input = model_config.single_input
+        self.apex_level = model_config.apex_level
 
         # 'max_seq_len': 128,
         # 'beam_size': 1,
@@ -118,6 +119,8 @@ class TransformerAgent(Agent):
                 self.model = self.model.cuda()
 
             self.model.eval()
+
+            self.model = apex_model(self.model, apex_level=self.apex_level)
 
         else:
             self.model = shared['model']
@@ -208,7 +211,7 @@ class TransformerAgent(Agent):
             if not self.use_cuda:
                 return data
 
-            if isinstance(data, (list, tuple)):
+            if isinstance(data, (list, tuple, map)):
                 return list(map(lambda x: x.cuda(), data))
 
             return data.cuda()
