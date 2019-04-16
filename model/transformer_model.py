@@ -123,6 +123,34 @@ class TransformerModel(nn.Module):
         self.pre_softmax.weight = self.transformer_module.embeddings.weight
         self.multiple_choice_head = MultipleChoiceHead(self.embeddings_size, dropout) if multiple_choice_head else None
 
+    def distribute(self, device):
+        self.transformer_module = nn.parallel.DistributedDataParallel(self.transformer_module.to(device))
+        if hasattr(self, 'encoder_module'):
+            self.encoder_module = nn.parallel.DistributedDataParallel(self.encoder_module.to(device))
+        self.pre_softmax = nn.parallel.DistributedDataParallel(self.pre_softmax.to(device))
+        self.multiple_choice_head = nn.parallel.DistributedDataParallel(self.multiple_choice_head.to(device)) \
+            if self.multiple_choice_head is not None else None
+
+    def state_dict(self):
+        state_dict = {}
+        for k in dir(self):
+            module = getattr(self, k)
+            if isinstance(module, nn.Module):
+                if isinstance(module, nn.parallel.DistributedDataParallel):
+                    module = module.module
+
+                state_dict[k] = module.state_dict()
+
+        return state_dict
+
+    def load_state_dict(self, state_dict, strict=True):
+        for k, v in state_dict.items():
+            assert hasattr(self, k), f'Model does not have {k} submodule'
+            module = getattr(self, k)
+            if isinstance(module, nn.parallel.DistributedDataParallel):
+                module = module.module
+            module.load_state_dict(v, strict)
+
     def forward(self, x, contexts=[]):
         enc_contexts = [self.encode(c) for c in contexts]
         return self.decode(x, enc_contexts)

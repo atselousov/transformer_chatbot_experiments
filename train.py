@@ -136,6 +136,15 @@ def main():
                                    aug_syn_proba=0.0,
                                    limit_size=trainer_config.limit_eval_size)
     logger.info(f'train dataset {len(train_dataset)} test dataset {(test_dataset)}')
+
+    if args.local_rank != -1:
+
+        torch.cuda.set_device(args.local_rank)
+        device = torch.device('cuda', args.local_rank)
+        torch.distributed.init_process_group(backend='nccl',
+                                             init_method='env://')
+        transformer.distribute(device)
+
     model_trainer = Trainer(transformer,
                             train_dataset,
                             writer,
@@ -251,7 +260,8 @@ def main():
         model_trainer.train(after_epoch_funcs=[save_func, sample_text_func, test_func],
                             risk_func=get_risk_metric_func(trainer_config.risk_metric))
     except (KeyboardInterrupt, Exception, RuntimeError) as e:
-        torch.save(model_trainer.state_dict(), interrupt_checkpoint_path)
+        if args.local_rank in [-1, 0]:
+            torch.save(model_trainer.state_dict(), interrupt_checkpoint_path)
         raise e
 
 

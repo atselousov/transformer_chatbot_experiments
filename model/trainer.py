@@ -41,11 +41,6 @@ class Trainer:
                  n_jobs=0, clip_grad=None, label_smoothing=0, device=torch.device('cuda'), weight_decay=0.1,
                  ignore_idxs=[], local_rank=-1, apex_level=None, apex_loss_scale=None,
                  linear_schedule=False, n_epochs=0, single_input=False, evaluate_full_sequences=False):
-        if local_rank != -1:
-            torch.cuda.set_device(local_rank)
-            device = torch.device("cuda", local_rank)
-            torch.distributed.init_process_group(backend='nccl',
-                                                 init_method='env://')
         n_gpu = torch.cuda.device_count()
         logger.info("device: {}, distributed training: {}, apex_level: {}, apex_scale_loss: {},  n_gpu: {}".format(
             device, bool(local_rank != -1), apex_level, apex_loss_scale, n_gpu))
@@ -64,20 +59,9 @@ class Trainer:
             ]
 
         base_optimizer = Adam(optimizer_grouped_parameters, lr=lr)
+        assert local_rank == -1 or apex_level is None, 'Distributed apex is not supported right now.'
         self.model, base_optimizer = apex_model(self.model, optimizer=base_optimizer,
                                                 apex_level=apex_level, apex_loss_scale=apex_loss_scale)
-
-        if local_rank != -1:
-            try:
-                from apex.parallel import DistributedDataParallel
-            except ImportError:
-                raise ImportError("Please install apex for distributed training.")
-
-            self.model = DistributedDataParallel(self.model)
-        elif (n_gpu > 1) and (batch_split % n_gpu == 0) and (batch_split > n_gpu):
-            assert apex_level is None, 'Apex doesn\'t support torch.DataParallel?'
-            self.model = nn.DataParallel(self.model)
-            batch_split = batch_split // n_gpu
 
         if not linear_schedule:
             self.optimizer = NoamOpt(self.model.embeddings_size, lr_warmup, base_optimizer, lr=lr,
@@ -115,6 +99,7 @@ class Trainer:
         self.single_input = single_input
         self.evaluate_full_sequences = evaluate_full_sequences
         self.global_step = 0
+        self.local_rank = local_rank
 
     def state_dict(self):
         return {'model': self.model.state_dict(),
