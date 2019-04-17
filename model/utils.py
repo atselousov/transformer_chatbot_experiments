@@ -14,33 +14,23 @@
 #  You should have received a copy of the GNU Affero General Public License
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import re
-import os
-import sys
-import io
-import json
 import random
 import copy
-from collections import namedtuple, Counter
+from collections import Counter
 
 import torch
 import torch.nn as nn
 import numpy as np
+from attrdict import AttrDict
 from scipy.interpolate import RectBivariateSpline
-from torch.utils.checkpoint import checkpoint
 
-py_version = sys.version.split('.')[0]
-if py_version == '2':
-    open = io.open
-    unicode = unicode
-else:
-    unicode = str
-    open = open
 
 def set_seed(seed):
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
     random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    torch.manual_seed(seed)
+
 
 def repeat_along_dim1(obj, repetitions):
     """ repeat (a possibly nested object of) tensors from (batch, ...) to (batch * repetitions, ...) """
@@ -51,6 +41,7 @@ def repeat_along_dim1(obj, repetitions):
     tail_dims = obj.shape[1:]
     obj = obj.unsqueeze(1).repeat([1, repetitions] + [1] * len(tail_dims))
     return obj.view(-1, *tail_dims)
+
 
 def pad_sequence(sequences, batch_first=False, padding_value=0):
     # assuming trailing dimensions and type of all the Tensors
@@ -77,28 +68,6 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
     return out_tensor
 
 
-def checkpoint_sequential(functions, segments, *inputs):
-    def run_function(start, end, functions):
-        def forward(*inputs):
-            for j in range(start, end + 1):
-                inputs = functions[j](*inputs)
-            return inputs
-        return forward
-
-    if isinstance(functions, torch.nn.Sequential):
-        functions = list(functions.children())
-
-    segment_size = len(functions) // segments
-    # the last chunk has to be non-volatile
-    end = -1
-    for start in range(0, segment_size * (segments - 1), segment_size):
-        end = start + segment_size - 1
-        inputs = checkpoint(run_function(start, end, functions), *inputs)
-        if not isinstance(inputs, tuple):
-            inputs = (inputs,)
-    return run_function(end + 1, len(functions) - 1, functions)(*inputs)
-
-
 def f1_score(predictions, targets, average=True):
     def f1_score_items(pred_items, gold_items):
         common = Counter(gold_items) & Counter(pred_items)
@@ -121,82 +90,48 @@ def f1_score(predictions, targets, average=True):
     return scores
 
 
-def openai_transformer_config():
-    class dotdict(dict):
-        __getattr__ = dict.get
-        __setattr__ = dict.__setitem__
-        __delattr__ = dict.__delitem__
+def load_gpt_weights(gpt_model, state, n_special_tokens=0):
+    if isinstance(gpt_model.embedding.pos_embedding, nn.Embedding):
+        if gpt_model.embedding.pos_embedding.num_embeddings - 1 > state['pos_embedding'].shape[0]:
+            xx = np.linspace(0, state['pos_embedding'].shape[0], gpt_model.embedding.pos_embedding.num_embeddings - 1)
+            new_kernel = RectBivariateSpline(np.arange(state['pos_embedding'].shape[0]),
+                                             np.arange(state['pos_embedding'].shape[1]),
+                                             state['pos_embedding'])
+            state['pos_embedding'] = new_kernel(xx, np.arange(state['pos_embedding'].shape[1]))
 
-    cfg = dotdict({'n_layers': 12, 'n_embeddings': 40477, 'n_pos_embeddings': 512, 
-                   'embeddings_size': 768, 'n_heads': 12, 'dropout': 0.1,
-                   'embed_dropout': 0.1, 'attn_dropout': 0.1, 'ff_dropout': 0.1})
+        state['pos_embedding'] = state['pos_embedding'][:gpt_model.embedding.pos_embedding.num_embeddings - 1]
+        gpt_model.embedding.pos_embedding.weight.data[1:] = torch.from_numpy(state['pos_embedding'])
+
+    state['tok_embedding'] = state['pos_embedding'][:gpt_model.embedding.tok_embedding.num_embeddings - n_special_tokens]
+    gpt_model.embedding.tok_embedding.weight.data[:n_special_tokens] = 0
+    gpt_model.embedding.tok_embedding.weight.data[n_special_tokens:] = torch.from_numpy(state['tok_embedding'])
+
+    gpt_model.load_state_dict(state['transformer_state'], strict=False)
+
+    # Initialize shared attention layer is necessary
+    for layer in gpt_model.layers:
+        attn_state = layer.attn.state_dict()
+        for context_attn in layer.context_attns:
+            context_attn.load_state_dict(copy.deepcopy(attn_state))
+
+
+def gpt_config():
+    cfg = AttrDict({'n_layers': 12,
+                    'n_embeddings': 40477,
+                    'n_pos_embeddings': 512,
+                    'embeddings_size': 768,
+                    'n_heads': 12,
+                    'dropout': 0.1,
+                    'embed_dropout': 0.1,
+                    'attn_dropout': 0.1,
+                    'ff_dropout': 0.1})
 
     return cfg
 
 
-def load_openai_weights(model, directory, n_special_tokens=0):
-    # TODO: add check of shapes
+def gpt2_config():
+    cfg = gpt_config()
+    cfg.n_embeddings = 50257
+    cfg.n_pos_embeddings = 1024
 
-    parameters_names_path = os.path.join(directory, 'parameters_names.json')
-    parameters_shapes_path = os.path.join(directory, 'parameters_shapes.json')
-    parameters_weights_paths = [os.path.join(directory, 'params_{}.npy'.format(n)) for n in range(10)]
-
-    with open(parameters_names_path, 'r') as parameters_names_file:
-        parameters_names = json.load(parameters_names_file)
-
-    with open(parameters_shapes_path, 'r') as parameters_shapes_file:
-        parameters_shapes = json.load(parameters_shapes_file)
-
-    parameters_weights = [np.load(path) for path in parameters_weights_paths]
-    parameters_offsets = np.cumsum([np.prod(shape) for shape in parameters_shapes])
-    parameters_weights = np.split(np.concatenate(parameters_weights, 0), parameters_offsets)[:-1]
-    parameters_weights = [p.reshape(s) for p, s in zip(parameters_weights, parameters_shapes)]
-
-    parameters_weights[1] = parameters_weights[1][1:] # skip 0 - <unk> 
-
-    if isinstance(model.pos_embeddings, nn.Embedding):
-        if model.pos_embeddings.num_embeddings - 1 > parameters_weights[0].shape[0]:
-            xx = np.linspace(0, parameters_weights[0].shape[0], model.pos_embeddings.num_embeddings - 1)
-            new_kernel = RectBivariateSpline(np.arange(parameters_weights[0].shape[0]),
-                                             np.arange(parameters_weights[0].shape[1]),
-                                             parameters_weights[0])
-            parameters_weights[0] = new_kernel(xx, np.arange(parameters_weights[0].shape[1]))
-
-        parameters_weights[0] = parameters_weights[0][:model.pos_embeddings.num_embeddings - 1]
-        model.pos_embeddings.weight.data[1:] = torch.from_numpy(parameters_weights[0])
-
-    parameters_weights[1] = parameters_weights[1][:model.embeddings.num_embeddings - n_special_tokens]
-    model.embeddings.weight.data[:n_special_tokens] = 0
-    model.embeddings.weight.data[n_special_tokens:] = torch.from_numpy(parameters_weights[1])
-
-    parameters_weights = parameters_weights[2:]
-
-    for name, weights in zip(parameters_names, parameters_weights):
-        name = name[6:]  # skip "model/"
-        assert name[-2:] == ':0'
-        name = name[:-2]
-        name = name.split('/')
-
-        pointer = model
-        for m_name in name:
-            if re.fullmatch(r'[A-Za-z]+\d+', m_name):
-                l = re.split(r'(\d+)', m_name)
-            else:
-                l = [m_name]
-
-            pointer = getattr(pointer, l[0])
-
-            if len(l) >= 2:
-                num = int(l[1])
-                pointer = pointer[num]
-
-        if len(weights.shape) == 3: # conv1d to linear
-            weights = weights[0].transpose((1, 0))
-
-        pointer.data[...] = torch.from_numpy(weights)
-
-        # Initialize shared attention layer is necessary
-        for layer in model.layers:
-            attn_state = layer.attn.state_dict()
-            for context_attn in layer.context_attns:
-                context_attn.load_state_dict(copy.deepcopy(attn_state))
+    return cfg
