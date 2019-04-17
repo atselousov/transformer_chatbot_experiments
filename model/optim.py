@@ -172,17 +172,21 @@ class NoamOpt:
         except KeyError as e:
             logger.info("Optimizer cannot be loaded from checkpoint: {}".format(e))
 
-    def backward(self, loss):
+    def backward(self, losses):
+        assert isinstance(losses, tuple)
+        full_loss = sum(losses)
         if self.apex_level is not None:
             try:
                 from apex.amp import scale_loss
             except ImportError:
                 raise ImportError("Please install apex.")
 
-            with scale_loss(loss, self.optimizer) as scaled_loss:
-                scaled_loss.backward()
+            for loss_id, loss in enumerate(losses):
+                with scale_loss(loss, self.optimizer, loss_id=loss_id) as scaled_loss:
+                    scaled_loss.backward()
         else:
-            loss.backward()
+            full_loss.backward()
+        return full_loss
 
     def zero_grad(self):
         return self.optimizer.zero_grad()

@@ -27,7 +27,7 @@ from .utils import repeat_along_dim1
 logger = logging.getLogger(__file__)
 
 
-def apex_model(model, *, apex_level=None, optimizer=None, apex_loss_scale=None):
+def apex_model(model, *, apex_level=None, optimizer=None, apex_loss_scale=None, num_losses=4):
     if apex_level is not None:
         assert apex_level == 'O0' or model.sparse_embeddings == False, 'Apex doesn\'t support sparse tensors'
 
@@ -36,7 +36,7 @@ def apex_model(model, *, apex_level=None, optimizer=None, apex_loss_scale=None):
         except ImportError:
             raise ImportError("Please install apex.")
 
-        return initialize(model, optimizer, opt_level=apex_level, loss_scale=apex_loss_scale)
+        return initialize(model, optimizer, opt_level=apex_level, loss_scale=apex_loss_scale, num_losses=num_losses)
 
     return model if optimizer is None else (model, optimizer)
 
