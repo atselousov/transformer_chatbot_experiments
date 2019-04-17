@@ -8,8 +8,6 @@ if __name__ == '__main__':
                         batchsize=10,
                         rank_candidates=True,
                         sample=False,
-                        clean_emoji=True,
-                        check_grammar=True,
                         max_seq_len=256,
                         beam_size=3,
                         annealing_topk=None,

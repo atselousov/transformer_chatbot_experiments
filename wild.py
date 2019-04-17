@@ -1,14 +1,12 @@
-from ParlAI.projects.convai.convai_world import ConvAIWorld
-from parlai.core.params import ParlaiParser
 from agent import TransformerAgent
+from parlai.core.params import ParlaiParser
+from ParlAI.projects.convai.convai_world import ConvAIWorld
 
 
 def main():
     parser = ParlaiParser(True, True)
     parser.set_defaults(batchsize=10,
                         sample=True,
-                        clean_emoji=True,
-                        check_grammar=True,
                         max_seq_len=256,
                         beam_size=3,
                         annealing_topk=None,
@@ -31,4 +29,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

@@ -16,7 +16,7 @@ def get_model_config(gpt2=False):
                        'beam_size': env_config('BEAM_SIZE', default=3, cast=int),
                        'diversity_groups': env_config('DIVERSITY_GROUP', default=1, cast=int),
                        'diversity_coef': env_config('DIVERSITY_COEF', default=0, cast=int),
-                       'annealing_prob': env_config('ANNEALING_PROB', default=0, cast=float),
+                       'annealing_proba': env_config('ANNEALING_PROBA', default=0, cast=float),
                        'annealing_topk': env_config('ANNEALING_TOPK', default=None, cast=int),
                        'length_penalty': env_config('LENGTH_PENALTY', default=0.6, cast=float),
 
@@ -27,6 +27,7 @@ def get_model_config(gpt2=False):
                        'use_start_end': env_config('USE_START_END', default=False, cast=bool),
 
                         # model type
+                       'opt_level': env_config('OPT_LEVEL', default=None, cast=str),  # 'O0', 'O1', 'O2', 'O3'
                        'single_input': env_config('SINGLE_INPUT', default=False, cast=bool),
                        'zero_shot': env_config('ZERO_SHOT', default=False, cast=bool),
                        'shared_attention': env_config('SHARED_ATTENTION', default=True, cast=bool),
@@ -78,8 +79,7 @@ def get_trainer_config(gpt2=False):
                        'risk_metric': env_config('RISK_METRIC', default='f1', cast=str),
                        'hits_weight': env_config('HITS_WEIGHT', default=0, cast=float),
                        'negative_samples': env_config('NEGATIVE_SAMPLES', default=0, cast=int),
-                       'fp16': env_config('FP16', default=False, cast=bool),
-                       'loss_scale': env_config('LOSS_SCALE', default=0, cast=float),
+                       'loss_scale': env_config('LOSS_SCALE', default=None, cast=str),  # e.g. '128', 'dynamic'
 
                        # info
                        'writer_comment': env_config('WRITER_COMMENT', default='', cast=str),

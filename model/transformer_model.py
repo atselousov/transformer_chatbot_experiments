@@ -14,8 +14,9 @@
 #  You should have received a copy of the GNU Affero General Public License
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import random
 import logging
+import random
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -24,6 +25,21 @@ from .transformer_module import TransformerModule
 from .utils import repeat_along_dim1
 
 logger = logging.getLogger(__file__)
+
+
+def apex_model(model, *, apex_level=None, optimizer=None, apex_loss_scale=None):
+    if apex_level is not None:
+        assert apex_level == 'O0' or model.sparse_embeddings == False, 'Apex doesn\'t support sparse tensors'
+
+        try:
+            from apex.amp import initialize
+        except ImportError:
+            raise ImportError("Please install apex.")
+
+        return initialize(model, optimizer, opt_level=apex_level, loss_scale=apex_loss_scale)
+
+    return model if optimizer is None else (model, optimizer)
+
 
 class MultipleChoiceHead(nn.Module):
     """ Classifier Head for the transformer """
@@ -132,8 +148,9 @@ class TransformerModel(nn.Module):
 
     def predict(self, contexts=[]):
         if self.single_input:
+            assert isinstance(contexts, torch.Tensor)
             enc_contexts = []
-            beam_starts = torch.cat(contexts, dim=1)
+            beam_starts = contexts
         else:
             enc_contexts = [self.encode(c) for c in contexts]
             beam_starts = None
@@ -170,6 +187,7 @@ class TransformerModel(nn.Module):
 
             max_seq_len = min(self.n_pos_embeddings - prevs.shape[1] - (beam_starts.shape[1] if beam_starts is not None else 0),
                               self.max_seq_len)
+
             for i in range(max_seq_len):
                 inputs = prevs if past is None else prevs[:, -1:, ...]  # only use the last token (rest is in past)
                 if self.dialog_embeddings and inputs.dim() < 3:

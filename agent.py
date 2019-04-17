@@ -1,14 +1,13 @@
+from collections import deque
+
 import torch
 import torch.nn.functional as F
-from collections import deque
-from parlai.core.agents import Agent
-from model.transformer_model import TransformerModel
-from model.text import BPEVocab
-from model.utils import pad_sequence
-from model.postprocessing import ngram_replaser, ReplyChecker, detokenize, syntax_fix
-from model.sentiment import pick_emoji, clean_emoji
+
 from config import get_model_config
-import random
+from model.text import BPEVocab
+from model.transformer_model import TransformerModel, apex_model
+from model.utils import pad_sequence
+from parlai.core.agents import Agent
 
 
 class TransformerAgent(Agent):
@@ -24,11 +23,6 @@ class TransformerAgent(Agent):
                                 help='Whether the model should parse candidates for ranking.')
         agent_args.add_argument('--sample', type=bool, default=False,
                                 help='Sampling of beam from beam search')
-        agent_args.add_argument('--clean_emoji', type=bool, default=True,
-                                help='')
-        agent_args.add_argument('--check_grammar', type=bool, default=True,
-                                help='')
-
         agent_args.add_argument('--max_seq_len', type=int, default=128,
                                 help='')
         agent_args.add_argument('--beam_size', type=int, default=1,
@@ -58,11 +52,10 @@ class TransformerAgent(Agent):
         model_config = get_model_config()
         self.vocab = BPEVocab.from_files(model_config.bpe_vocab_path, model_config.bpe_codes_path)
 
-        self.clean_emoji = self.opt['clean_emoji']
-        self.check_grammar = self.opt['check_grammar']
         self.dialog_embeddings = model_config.dialog_embeddings
         self.use_start_end = model_config.use_start_end
         self.single_input = model_config.single_input
+        self.apex_level = model_config.apex_level
 
         # 'max_seq_len': 128,
         # 'beam_size': 1,
@@ -127,33 +120,24 @@ class TransformerAgent(Agent):
 
             self.model.eval()
 
+            self.model = apex_model(self.model, apex_level=self.apex_level)
+
         else:
             self.model = shared['model']
 
         self.reset()
 
-    def _preprocess_text(self, text):
-        if self.clean_emoji:
-            text = clean_emoji(text)
-
-        if self.check_grammar:
-            text = syntax_fix(text).lower()
-
-        return text
-
     def _parse(self, text):
-        # todo: fix grammar mistakes?
         persona_info = []
         dialog = []
+
         for subtext in text.split('\n'):
             subtext = subtext.strip()
             
             if subtext.startswith('your persona:'):
                 subtext = subtext.replace('your persona:', '').strip()
-                subtext = self._preprocess_text(subtext).strip()
                 persona_info.append(subtext)
             else:
-                subtext = self._preprocess_text(subtext).strip()
                 dialog.append(subtext)
 
         return persona_info, dialog
@@ -223,8 +207,14 @@ class TransformerAgent(Agent):
             ids = self._add_dialog_embeddings(ids, self.vocab.sent_dialog_id)
             return torch.tensor(ids, dtype=torch.long)
 
-        def to_cuda(data_list):
-            return list(map(lambda x: x.cuda(), data_list)) if self.use_cuda else data_list
+        def to_cuda(data):
+            if not self.use_cuda:
+                return data
+
+            if isinstance(data, (list, tuple, map)):
+                return list(map(lambda x: x.cuda(), data))
+
+            return data.cuda()
 
         batch_reply = [{'id': self.getID(), 'text': '', 'text_candidates': []} for _ in range(len(observations))]
         valid_ids = [i for i, obs in enumerate(observations) if is_valid_history(obs['agent'].history)]
@@ -249,16 +239,16 @@ class TransformerAgent(Agent):
                 contexts.append(dialogs)
 
             if self.single_input:
-                contexts = [torch.cat(c, dim=0).unsqueeze(0) for c in zip(*contexts)]
+                contexts = [torch.cat(c, dim=0) for c in zip(*contexts)]
+                raw_context = contexts if self.opt['rank_candidates'] else None
+                contexts = pad_sequence(contexts, batch_first=True, padding_value=self.model.padding_idx, left=True)
             else:
                 contexts = map(lambda x: pad_sequence(x, batch_first=True, padding_value=self.model.padding_idx),
                                contexts)
 
             contexts = to_cuda(contexts)
 
-            # because of different lens of context when single_input == True
-            pred_texts = [self.model.predict([c])[0] for c in contexts] if self.single_input \
-                          else self.model.predict(contexts)
+            pred_texts = self.model.predict(contexts)
 
             for i in range(batch_size):
                 pred_toks = self._process_2nd_replica(pred_texts[i])
@@ -267,11 +257,7 @@ class TransformerAgent(Agent):
                 batch_reply[valid_ids[i]]['episode_done'] = valid_observations[i]['agent'].episode_done
 
             if self.opt['rank_candidates']:
-                if self.single_input:
-                    enc_contexts = []
-                    contexts = list(map(lambda x: x.squeeze(0), contexts))
-                else:
-                    enc_contexts = [self.model.encode(c) for c in contexts]
+                enc_contexts = [self.model.encode(c) for c in contexts] if not self.single_input else []
 
                 candidates = [list(obs.get('label_candidates', [])) for obs in valid_observations]
                 lens_candidates = [len(c) for c in candidates]
@@ -282,15 +268,17 @@ class TransformerAgent(Agent):
 
                     for i in range(max(lens_candidates)):
                         current_cands = [to_tensor(c[i])[:self.model.n_pos_embeddings-1] for c in candidates]
-                        current_cands = to_cuda(current_cands)
 
+                        lens = map(lambda x: x.size(0), current_cands) if self.single_input else None
                         if self.single_input:
                             lens = map(lambda x: x.size(0), current_cands)
-                            current_cands = [torch.cat(c, dim=0)[:self.model.n_pos_embeddings-1] for c in
-                                             zip(contexts, current_cands)]
+                            current_cands = [torch.cat(c, dim=0)[-self.model.n_pos_embeddings:]
+                                             for c in zip(raw_context, current_cands)]
 
+                        current_cands = to_cuda(current_cands)
                         current_cands = pad_sequence(current_cands, batch_first=True,
                                                      padding_value=self.model.padding_idx)
+
                         logits = self.model.decode(current_cands[:, :-1], enc_contexts)
 
                         if current_cands.dim() == 3:

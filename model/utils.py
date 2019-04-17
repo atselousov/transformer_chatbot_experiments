@@ -18,11 +18,12 @@ import random
 import copy
 from collections import Counter
 
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
 from attrdict import AttrDict
 from scipy.interpolate import RectBivariateSpline
+
 
 
 def set_seed(seed):
@@ -32,24 +33,24 @@ def set_seed(seed):
     torch.manual_seed(seed)
 
 
+
 def repeat_along_dim1(obj, repetitions):
     """ repeat (a possibly nested object of) tensors from (batch, ...) to (batch * repetitions, ...) """
     if isinstance(obj, tuple):
         return tuple(repeat_along_dim1(o, repetitions) for o in obj)
     if isinstance(obj, list):
         return list(repeat_along_dim1(o, repetitions) for o in obj)
-    tail_dims = obj.shape[1:]
-    obj = obj.unsqueeze(1).repeat([1, repetitions] + [1] * len(tail_dims))
-    return obj.view(-1, *tail_dims)
+
+    obj = obj.unsqueeze(1).repeat([1, repetitions] + [1] * len(obj.size()[1:]))
+    return obj.view(-1, *obj.size()[2:])
 
 
-def pad_sequence(sequences, batch_first=False, padding_value=0):
+def pad_sequence(sequences, batch_first=False, padding_value=0, left=False):
     # assuming trailing dimensions and type of all the Tensors
     # in sequences are same and fetching those from sequences[0]
     if not len(sequences):
         return torch.empty(0)
-    max_size = sequences[0].size()
-    trailing_dims = max_size[1:]
+    trailing_dims = sequences[0].size()[1:]
     max_len = max([s.size(0) for s in sequences])
     if batch_first:
         out_dims = (len(sequences), max_len) + trailing_dims
@@ -59,11 +60,9 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
     out_tensor = sequences[0].data.new(*out_dims).fill_(padding_value)
     for i, tensor in enumerate(sequences):
         length = tensor.size(0)
-        # use index notation to prevent duplicate references to the tensor
-        if batch_first:
-            out_tensor[i, :length, ...] = tensor
-        else:
-            out_tensor[:length, i, ...] = tensor
+        s_slice = slice(-length, None) if left else slice(None, length)
+        s_slice = (i, s_slice) if batch_first else (s_slice, i)
+        out_tensor[s_slice] = tensor
 
     return out_tensor
 

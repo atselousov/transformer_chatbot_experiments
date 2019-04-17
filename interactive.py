@@ -1,15 +1,12 @@
 from parlai.core.params import ParlaiParser
 from parlai.scripts.interactive import interactive
 
+
 if __name__ == '__main__':
     parser = ParlaiParser(add_model_args=True)
 
     parser.set_defaults(model='agent:TransformerAgent',
                         sample=False,
-                        wild_mode=False,
-                        clean_emoji=False,
-                        check_grammar=False,
-
                         max_seq_len=256,
                         beam_size=3,
                         annealing_topk=None,
