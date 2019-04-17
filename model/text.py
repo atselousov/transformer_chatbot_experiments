@@ -285,15 +285,13 @@ ZERO_SHOT_SPECIAL_TOKENS = SpecialTokensTuple(pad='<pad>',
                                               talker2_dialog='#')
 
 
-class VocabType(Enum):
-    GPT = 'gpt'
-    GPT2 = 'gpt2'
+def get_vocab(vocab_path, codes_path, tokenizer_type='gpt', zero_shot_special_tokens=False):
+    if tokenizer_type not in ['gpt', 'gpt2']:
+        raise ValueError(f'Wrong tokenizer type: expected ["gpt", "gpt2"], got {tokenizer_type}')
 
-
-def get_vocab(vocab_path, codes_path, tokenizer_type=VocabType.GPT, zero_shot_special_tokens=False):
-    if tokenizer_type == VocabType.GPT:
+    if tokenizer_type == 'gpt':
         tokenizer = GPTTokenizer()
-    elif tokenizer_type == VocabType.GPT2:
+    elif tokenizer_type == 'gpt2':
         tokenizer = GPT2Tokenizer()
     else:
         assert False
