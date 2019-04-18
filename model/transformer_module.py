@@ -333,6 +333,7 @@ class TransformerModule(nn.Module):
         enc_contexts = sum(enc_contexts, ())
 
         if self.n_segments is not None:
+            assert False, 'Beam search is not supported'
             padding_mask = padding_mask.float()  # fucking checkpoint_sequential
             padding_mask.requires_grad_()  # fucking checkpoint_sequential
             out = checkpoint_sequential(self.layers, self.n_segments, x, padding_mask, *enc_contexts)

@@ -162,6 +162,33 @@ class TransformerModel(nn.Module):
         """https://arxiv.org/abs/1609.08144"""
         return (5 + sequence_lengths) ** self.length_penalty_coef / (5 + 1) ** self.length_penalty_coef
 
+    def _sample(self, beam_scores, num_samples, sample_prob=1.):
+        if random.random() < sample_prob:
+            beam_probas = F.softmax(beam_scores, dim=-1)
+            if self.annealing_topk is not None:
+                beam_probas, sample_idxs = beam_probas.topk(self.annealing_topk, dim=-1)
+                idxs = torch.multinomial(beam_probas, num_samples)
+                idxs = torch.gather(sample_idxs, 1, idxs)
+            else:
+                idxs = torch.multinomial(beam_probas, num_samples)
+
+            scores = torch.gather(beam_scores, 1, idxs)
+        else:
+            scores, idxs = beam_scores.topk(num_samples, dim=-1)
+
+        return scores, idxs
+
+    def _fix_past(self, past, beam_idxs):
+        for layer_output in past:
+            for context in layer_output:
+                for v in context:
+                    size_ = v.size()
+                    tile_size = size_[-2] * size_[-1]
+                    new_v = v.view(-1, self.beam_size, tile_size)
+                    new_v = new_v.gather(1, beam_idxs.unsqueeze(-1).repeat([1, 1, tile_size]))
+                    v[...] = new_v.view(*size_)
+        return past
+
     def beam_search(self, enc_contexts=[], return_beams=False, beam_starts=None):
         with torch.no_grad():
             if len(enc_contexts) == 0 and beam_starts is None:
@@ -189,20 +216,19 @@ class TransformerModel(nn.Module):
                               self.max_seq_len)
 
             for i in range(max_seq_len):
-                inputs = prevs if past is None else prevs[:, -1:, ...]  # only use the last token (rest is in past)
+                inputs = prevs[:, -1:, ...]  # only use the last token (rest is in past)
                 if self.dialog_embeddings and inputs.dim() < 3:
                     inputs = torch.stack((inputs, torch.full_like(inputs, self.sent_dialog_id)), dim=inputs.dim())
                 if i == 0 and beam_starts is not None:
                     inputs = torch.cat((beam_starts, inputs), dim=1)
+
                 outputs, _, past = self.transformer_module(inputs, beam_enc_contexts, past=past)
 
                 logits = self.generate(outputs[:, -1, :])
                 log_probs = F.log_softmax(logits.float(), dim=-1)
                 log_probs = log_probs.view(batch_size, self.beam_size, -1)
-
                 beam_scores = beam_scores.unsqueeze(-1) + log_probs * (1 - is_end.float().unsqueeze(-1))
-                penalty = self._length_penalty(beam_lens.float() + 1 - is_end.float())
-                penalty = penalty.unsqueeze(-1).repeat(1, 1, self.n_embeddings)
+                penalty = self._length_penalty(beam_lens.float() + 1 - is_end.float()).unsqueeze(-1)
                 beam_scores = beam_scores / penalty
 
                 if i == 0:
@@ -222,25 +248,16 @@ class TransformerModel(nn.Module):
                         g_beam_scores -= self.diversity_coef * diversity_penalty.unsqueeze(1) / g_penalty
                         g_beam_scores = g_beam_scores.view(batch_size, -1)
 
-                        if random.random() < current_sample_prob:
-                            beam_probas = F.softmax(g_beam_scores, dim=-1)
-                            if self.annealing_topk is not None:
-                                beam_probas, sample_idxs = beam_probas.topk(self.annealing_topk, dim=-1)
-                                g_idxs = torch.multinomial(beam_probas, group_size)
-                                g_idxs = torch.gather(sample_idxs, 1, g_idxs)
-                            else:
-                                g_idxs = torch.multinomial(beam_probas, group_size)
-                        else:
-                            _, g_idxs = g_beam_scores.topk(group_size, dim=-1)
-                        
-                        g_scores = torch.gather(beam_scores[:, g, :, :].view(batch_size, -1), 1, g_idxs)
+                        g_scores, g_idxs = self._sample(g_beam_scores, group_size, sample_prob=current_sample_prob)
                         g_idxs += g * group_size * self.n_embeddings
 
                         all_scores.append(g_scores)
                         all_idxs.append(g_idxs)
 
-                        diversity_penalty.scatter_add_(1, torch.fmod(g_idxs, self.n_embeddings), torch.ones((batch_size, group_size), device=device))
-                     
+                        diversity_penalty.scatter_add_(1,
+                                                       torch.fmod(g_idxs, self.n_embeddings),
+                                                       torch.ones((batch_size, group_size), device=device))
+
                     diversity_penalty.fill_(0)
                     penalty = penalty.view(batch_size, -1)
                     beam_scores = torch.cat(all_scores, dim=-1)
@@ -248,7 +265,6 @@ class TransformerModel(nn.Module):
 
                     beam_idxs = (idxs.float() / self.n_embeddings).long()
 
-                penalty = torch.gather(penalty, 1, idxs)
                 sym_idxs = torch.fmod(idxs, log_probs.shape[-1])
                 is_end = torch.gather(is_end, 1, beam_idxs)
                 beam_lens = torch.gather(beam_lens, 1, beam_idxs)
@@ -268,9 +284,11 @@ class TransformerModel(nn.Module):
                 prevs = prevs.view(batch_size * self.beam_size, -1)
                 prevs = torch.cat([prevs, sym_idxs], dim=1)
 
+                past = self._fix_past(past, beam_idxs)
+
                 if all(is_end.view(-1)):
                     break
-                
+
                 beam_scores *= penalty
                 current_sample_prob *= self.annealing
 
@@ -278,7 +296,7 @@ class TransformerModel(nn.Module):
             result = prevs.view(batch_size, self.beam_size, -1)
 
             if return_beams:
-                 return result, beam_lens
+                return result, beam_lens
 
             if self.sample:
                 probs = F.softmax(beam_scores, dim=-1)
