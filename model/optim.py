@@ -173,8 +173,10 @@ class NoamOpt:
             logger.info("Optimizer cannot be loaded from checkpoint: {}".format(e))
 
     def backward(self, losses):
-        assert isinstance(losses, tuple)
-        full_loss = sum(losses)
+        if not isinstance(losses, (tuple, list)):
+            losses = [losses]
+        full_loss = sum(losses, 0)
+
         if self.apex_level is not None:
             try:
                 from apex.amp import scale_loss
