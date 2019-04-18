@@ -298,11 +298,13 @@ class Trainer:
             batch_risk_loss = self._risk_loss(contexts, targets, enc_contexts, risk_func)
 
             # optimization
-            full_loss = (self.lm_weight * batch_lm_loss
-                         + self.risk_weight * batch_risk_loss
-                         + self.hits_weight * batch_hits_loss
-                         + self.s2s_weight * batch_s2s_loss)
-            self.optimizer.backward(full_loss / self.batch_split)
+            full_loss = (self.lm_weight * batch_lm_loss / self.batch_split,
+                         self.risk_weight * batch_risk_loss / self.batch_split,
+                         self.hits_weight * batch_hits_loss / self.batch_split,
+                         self.s2s_weight * batch_s2s_loss / self.batch_split)
+            full_loss = tuple(filter(lambda x: x.requires_grad, full_loss))
+
+            full_loss = self.optimizer.backward(full_loss)
 
             lm_loss = (i * lm_loss + batch_lm_loss.item()) / (i + 1)
             s2s_loss = (i * s2s_loss + batch_s2s_loss.item()) / (i + 1)
