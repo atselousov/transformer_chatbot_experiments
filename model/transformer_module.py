@@ -295,7 +295,7 @@ class TransformerBlock(nn.Module):
         for i, attn_past_kv in zip(range(len(inputs)), layer_past):
             c, m = inputs[i]
             attn = self.attn if i == 0 else self.context_attns[i - 1]
-            a, key_value, query = attn(x, c, c, m, attn_past_kv=attn_past_kv, attn_past_q=query)
+            a, key_value, query = attn(x, c, c, m, past_key_value=attn_past_kv, past_query=query)
             
             saved_kv.append(key_value)
             result_attns.append(a)
