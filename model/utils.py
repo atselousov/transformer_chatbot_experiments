@@ -15,23 +15,16 @@
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import random
-import copy
 from collections import Counter
 
-import numpy as np
 import torch
-import torch.nn as nn
-from attrdict import AttrDict
-from scipy.interpolate import RectBivariateSpline
 
 
-
-def set_seed(seed):
+def set_seed(seed=0):
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     torch.manual_seed(seed)
-
 
 
 def repeat_along_dim1(obj, repetitions):
@@ -87,50 +80,3 @@ def f1_score(predictions, targets, average=True):
         return sum(scores) / len(scores)
 
     return scores
-
-
-def load_gpt_weights(gpt_model, state, n_special_tokens=0):
-    if isinstance(gpt_model.embedding.pos_embedding, nn.Embedding):
-        if gpt_model.embedding.pos_embedding.num_embeddings - 1 > state['pos_embedding'].shape[0]:
-            xx = np.linspace(0, state['pos_embedding'].shape[0], gpt_model.embedding.pos_embedding.num_embeddings - 1)
-            new_kernel = RectBivariateSpline(np.arange(state['pos_embedding'].shape[0]),
-                                             np.arange(state['pos_embedding'].shape[1]),
-                                             state['pos_embedding'])
-            state['pos_embedding'] = new_kernel(xx, np.arange(state['pos_embedding'].shape[1]))
-
-        state['pos_embedding'] = state['pos_embedding'][:gpt_model.embedding.pos_embedding.num_embeddings - 1]
-        gpt_model.embedding.pos_embedding.weight.data[1:] = torch.from_numpy(state['pos_embedding'])
-
-    state['tok_embedding'] = state['pos_embedding'][:gpt_model.embedding.tok_embedding.num_embeddings - n_special_tokens]
-    gpt_model.embedding.tok_embedding.weight.data[:n_special_tokens] = 0
-    gpt_model.embedding.tok_embedding.weight.data[n_special_tokens:] = torch.from_numpy(state['tok_embedding'])
-
-    gpt_model.load_state_dict(state['transformer_state'], strict=False)
-
-    # Initialize shared attention layer is necessary
-    for layer in gpt_model.layers:
-        attn_state = layer.attn.state_dict()
-        for context_attn in layer.context_attns:
-            context_attn.load_state_dict(copy.deepcopy(attn_state))
-
-
-def gpt_config():
-    cfg = AttrDict({'n_layers': 12,
-                    'n_embeddings': 40477,
-                    'n_pos_embeddings': 512,
-                    'embeddings_size': 768,
-                    'n_heads': 12,
-                    'dropout': 0.1,
-                    'embed_dropout': 0.1,
-                    'attn_dropout': 0.1,
-                    'ff_dropout': 0.1})
-
-    return cfg
-
-
-def gpt2_config():
-    cfg = gpt_config()
-    cfg.n_embeddings = 50257
-    cfg.n_pos_embeddings = 1024
-
-    return cfg
