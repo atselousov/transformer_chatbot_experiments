@@ -16,6 +16,7 @@
 
 import logging
 import random
+import copy
 
 import torch
 import torch.nn as nn
@@ -69,11 +70,11 @@ class MultipleChoiceHead(nn.Module):
 class TransformerModel(nn.Module):
     def __init__(self, n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
                  padding_idx, n_heads, dropout, embed_dropout, attn_dropout, ff_dropout,
-                 bos_id, eos_id, sent_dialog_id, max_seq_len=256, beam_size=5, sample=False,
-                 length_penalty=0.8, annealing_topk=None, annealing=0, normalize_embeddings=True,
-                 diversity_coef=0, diversity_groups=1, n_segments=None, multiple_choice_head=False,
-                 single_input=False, dialog_embeddings=False, vocab=None, constant_embedding=False,
-                 share_models=True, successive_attention=False, sparse_embeddings=False,
+                 bos_id, eos_id, sent_dialog_id, max_seq_len=256, beam_size=5, sample_best_beam=False,
+                 length_penalty=0.8, annealing_topk=None, annealing_proba=0,
+                 diversity_coef=0, diversity_groups=1, multiple_choice_head=False,
+                 single_input=False, dialog_embeddings=False, constant_pos_embedding=False,
+                 shared_enc_dec=True, successive_attention=False, sparse_embeddings=False,
                  shared_attention=True, context_size=2):
 
         super(TransformerModel, self).__init__()
@@ -90,37 +91,26 @@ class TransformerModel(nn.Module):
 
         self.max_seq_len = max_seq_len
         self.beam_size = beam_size
-        self.sample = sample
+        self.sample_best_beam = sample_best_beam
         self.length_penalty_coef = length_penalty
-        self.annealing = annealing
+        self.annealing_proba = annealing_proba
         self.annealing_topk = annealing_topk
         self.diversity_coef = diversity_coef
         self.diversity_groups = diversity_groups
 
         self.single_input = single_input
         self.dialog_embeddings = dialog_embeddings
-        self.share_models = share_models
 
-        self.vocab = vocab
-
-        self.transformer_module = TransformerModule(n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
-                                                    padding_idx, n_heads, dropout, embed_dropout, attn_dropout,
-                                                    ff_dropout, normalize_embeddings, n_segments,
-                                                    constant_embedding=constant_embedding,
-                                                    successive_attention=successive_attention,
-                                                    sparse_embeddings=sparse_embeddings,
-                                                    shared_attention=shared_attention,
-                                                    context_size=context_size)
-        if not share_models:
-            self.encoder_module = TransformerModule(n_layers, n_embeddings, n_pos_embeddings, embeddings_size, 
-                                                    padding_idx, n_heads, dropout, embed_dropout, attn_dropout,
-                                                    ff_dropout, normalize_embeddings, n_segments,
-                                                    constant_embedding=constant_embedding,
-                                                    successive_attention=successive_attention,
-                                                    sparse_embeddings=sparse_embeddings,
-                                                    shared_attention=shared_attention)
+        self.decoder = TransformerModule(n_layers, n_embeddings, n_pos_embeddings, embeddings_size, padding_idx,
+                                         n_heads, dropout, embed_dropout, attn_dropout, ff_dropout,
+                                         constant_pos_embedding=constant_pos_embedding,
+                                         successive_attention=successive_attention,
+                                         sparse_embedding=sparse_embeddings,
+                                         shared_attention=shared_attention,
+                                         context_size=context_size)
+        self.encoder = self.decoder if shared_enc_dec else copy.deepcopy(self.decoder)
         self.pre_softmax = nn.Linear(embeddings_size, n_embeddings, bias=False)
-        self.pre_softmax.weight = self.transformer_module.embeddings.weight
+        self.pre_softmax.weight = self.decoder.embedding.tok_embedding.weight
         self.multiple_choice_head = MultipleChoiceHead(self.embeddings_size, dropout) if multiple_choice_head else None
 
     def forward(self, x, contexts=[]):
@@ -129,7 +119,7 @@ class TransformerModel(nn.Module):
 
     def encode(self, x):
         " Returns a tuple(x, padding_mask)"
-        x, padding_mask, _ = self.transformer_module(x) if self.share_models else self.encoder_module(x)
+        x, padding_mask, _ = self.encoder(x)
         return x, padding_mask
 
     def generate(self, enc_x):
@@ -139,11 +129,11 @@ class TransformerModel(nn.Module):
         return self.multiple_choice_head(x, padding_mask)
 
     def decode_classify(self, x, enc_contexts=[]):
-        x, padding_mask, _ = self.transformer_module(x, enc_contexts)
+        x, padding_mask, _ = self.decoder(x, enc_contexts)
         return self.classify(x, padding_mask)
 
     def decode(self, x, enc_contexts=[]):
-        x, _, _ = self.transformer_module(x, enc_contexts)
+        x, _, _ = self.decoder(x, enc_contexts)
         return self.generate(x)
 
     def predict(self, contexts=[]):
@@ -184,7 +174,7 @@ class TransformerModel(nn.Module):
                 for v in context:
                     size_ = v.size()
                     tile_size = size_[-2] * size_[-1]
-                    new_v = v.view(-1, self.beam_size, tile_size)
+                    new_v = v.contiguous().view(-1, self.beam_size, tile_size)
                     new_v = new_v.gather(1, beam_idxs.unsqueeze(-1).repeat([1, 1, tile_size]))
                     v[...] = new_v.view(*size_)
         return past
@@ -222,7 +212,7 @@ class TransformerModel(nn.Module):
                 if i == 0 and beam_starts is not None:
                     inputs = torch.cat((beam_starts, inputs), dim=1)
 
-                outputs, _, past = self.transformer_module(inputs, beam_enc_contexts, past=past)
+                outputs, _, past = self.decoder(inputs, beam_enc_contexts, past=past)
 
                 logits = self.generate(outputs[:, -1, :])
                 log_probs = F.log_softmax(logits.float(), dim=-1)
@@ -269,11 +259,6 @@ class TransformerModel(nn.Module):
                 is_end = torch.gather(is_end, 1, beam_idxs)
                 beam_lens = torch.gather(beam_lens, 1, beam_idxs)
 
-                if self.vocab is not None:
-                    logger.info('\nbeams:\n' + '\n'.join(self.vocab.ids2string(t.detach().cpu().tolist()) for t in prevs))
-                    logger.info('\ntop-options:\n' + '\n'.join(self.vocab.ids2string(t.detach().cpu().tolist())
-                                + str(bi.detach().cpu().tolist()) for t, bi in zip(sym_idxs, beam_idxs)))
-
                 sym_idxs[is_end] = self.padding_idx
                 beam_lens[~is_end] += 1
                 is_end[sym_idxs == self.eos_id] = 1
@@ -290,7 +275,7 @@ class TransformerModel(nn.Module):
                     break
 
                 beam_scores *= penalty
-                current_sample_prob *= self.annealing
+                current_sample_prob *= self.annealing_proba
 
             predicts = []
             result = prevs.view(batch_size, self.beam_size, -1)
@@ -298,7 +283,7 @@ class TransformerModel(nn.Module):
             if return_beams:
                 return result, beam_lens
 
-            if self.sample:
+            if self.sample_best_beam:
                 probs = F.softmax(beam_scores, dim=-1)
                 bests = torch.multinomial(probs, 1).view(-1)
             else:
