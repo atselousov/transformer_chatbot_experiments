@@ -19,7 +19,7 @@ import torch.nn as nn
 
 
 class LabelSmoothingLoss(nn.Module):
-    def __init__(self, n_labels, smoothing=0.0, ignore_index=-100, size_average=True):
+    def __init__(self, n_labels, smoothing=0.0, ignore_index=-100, reduction='mean'):
         super(LabelSmoothingLoss, self).__init__()
         assert 0 <= smoothing <= 1
 
@@ -27,14 +27,16 @@ class LabelSmoothingLoss(nn.Module):
         self.confidence = 1 - smoothing
 
         if smoothing > 0:
-            self.criterion = nn.KLDivLoss(size_average=size_average)
+            if reduction == 'mean':
+                reduction = 'batchmean'
+            self.criterion = nn.KLDivLoss(reduction=reduction)
             n_ignore_idxs = 1 + (ignore_index >= 0)
             one_hot = torch.full((1, n_labels), fill_value=(smoothing / (n_labels - n_ignore_idxs)))
             if ignore_index >= 0:
                 one_hot[0, ignore_index] = 0
             self.register_buffer('one_hot', one_hot)
         else:
-            self.criterion = nn.NLLLoss(size_average=size_average, ignore_index=ignore_index)
+            self.criterion = nn.NLLLoss(reduction=reduction, ignore_index=ignore_index)
         
     def forward(self, log_inputs, targets):
         if self.confidence < 1:
