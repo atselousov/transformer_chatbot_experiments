@@ -1,10 +1,11 @@
 from collections import deque
+from pathlib import Path
 
 import torch
 import torch.nn.functional as F
 
 from config import get_model_config
-from model.text import BPEVocab
+from model.text import get_vocab
 from model.transformer_model import TransformerModel, apex_model
 from model.utils import pad_sequence
 from parlai.core.agents import Agent
@@ -50,22 +51,21 @@ class TransformerAgent(Agent):
         torch.set_grad_enabled(False)
 
         model_config = get_model_config()
-        self.vocab = BPEVocab.from_files(model_config.bpe_vocab_path, model_config.bpe_codes_path)
+        vocab_path, codes_path = Path(model_config.vocab_path), Path(model_config.codes_path)
+        if not vocab_path.exists():
+            prepare_bpe_vocab(vocab_path, model=model_config.model)
+        if not codes_path.exists():
+            prepare_bpe_codes(codes_path, model=model_config.model)
+
+        self.vocab = get_vocab(vocab_path=vocab_path,
+                               codes_path=codes_path,
+                               tokenizer_type=model_config.model,
+                               zero_shot_special_tokens=model_config.zero_shot)
 
         self.dialog_embeddings = model_config.dialog_embeddings
         self.use_start_end = model_config.use_start_end
         self.single_input = model_config.single_input
-        self.apex_level = model_config.apex_level
-
-        # 'max_seq_len': 128,
-        # 'beam_size': 1,
-        # 'diversity_coef': 0,
-        # 'diversity_groups': 1,
-        # 'annealing_topk': None,
-        # 'annealing': 0,
-        # 'length_penalty': 0.6,
-
-        self.vocab = BPEVocab.from_files(model_config.bpe_vocab_path, model_config.bpe_codes_path)
+        self.apex_level = model_config.opt_level
 
         if self.opt['annealing_topk'] is not None:
             assert self.opt['annealing_topk'] > self.opt['beam_size']
@@ -90,36 +90,31 @@ class TransformerAgent(Agent):
                                           max_seq_len=self.opt['max_seq_len'],
                                           beam_size=self.opt['beam_size'],
                                           length_penalty=self.opt['length_penalty'],
-                                          n_segments=model_config.n_segments,
-                                          sample=self.opt['sample'],
+                                          sample_best_beam=self.opt['sample'],
                                           annealing_topk=self.opt['annealing_topk'],
-                                          annealing=self.opt['annealing'],
+                                          annealing_proba=self.opt['annealing'],
                                           diversity_coef=self.opt['diversity_coef'],
                                           diversity_groups=self.opt['diversity_groups'],
-                                          normalize_embeddings=model_config.normalize_embeddings,
-                                          multiple_choice_head=model_config.multiple_choice_head,
-                                          constant_embedding=model_config.constant_embedding,
-                                          vocab=self.vocab,
+                                          multiple_choice_head=False,
+                                          constant_pos_embedding=model_config.constant_pos_embedding,
                                           single_input=model_config.single_input,
                                           dialog_embeddings=model_config.dialog_embeddings,
-                                          share_models=model_config.share_models,
+                                          shared_enc_dec=model_config.shared_enc_dec,
                                           successive_attention=model_config.successive_attention,
                                           sparse_embeddings=model_config.sparse_embeddings,
-                                          shared_attention=model_config.sparse_embeddings
+                                          shared_attention=model_config.shared_attention
                                           )
 
-            state_dict = torch.load(model_config.checkpoint_path, map_location=lambda storage, loc: storage)
+            state_dict = torch.load(model_config.weights_path, map_location='cpu')
             if 'model' in state_dict:
                 state_dict = state_dict['model']
 
             self.model.load_state_dict(state_dict)
-            print('Weights loaded from {}'.format(model_config.checkpoint_path))
+            print('Weights loaded from {}'.format(model_config.weights_path))
 
             if self.use_cuda:
                 self.model = self.model.cuda()
-
             self.model.eval()
-
             self.model = apex_model(self.model, apex_level=self.apex_level)
 
         else:
