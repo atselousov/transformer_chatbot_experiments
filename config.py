@@ -1,33 +1,43 @@
 import git
 import torch
 from attrdict import AttrDict
-from model.utils import gpt_config, gpt2_config
+from model.gpt_utils import MODEL_INFO
 from decouple import Csv, config as env_config
 
 
-def get_model_config(gpt2=False):
-    default_config = gpt2_config() if gpt2 else gpt_config()
+model = env_config('MODEL', default='gpt2', cast=str)
 
-    config = AttrDict({ # weights
-                        'weights_path': './checkpoints/last_checkpoint.pt',
 
-                        # decoding
+def get_model_config():
+    supported_models = list(MODEL_INFO.keys())
+    if model not in supported_models:
+        raise ValueError(f'Wrong model: expected {supported_models}, got {model}')
+
+    default_config = AttrDict(MODEL_INFO[model]['config'])
+    config = AttrDict({# weights and vocab
+                       'weights_path': './checkpoints/last_checkpoint.pt',
+                       'vocab_path': f'./{model}_parameters/bpe.vocab',
+                       'codes_path': f'./{model}_parameters/bpe.codes',
+
+                       # decoding
                        'max_seq_len': 128,
                        'beam_size': env_config('BEAM_SIZE', default=3, cast=int),
+                       'sample_best_beam': False,
                        'diversity_groups': env_config('DIVERSITY_GROUP', default=1, cast=int),
                        'diversity_coef': env_config('DIVERSITY_COEF', default=0, cast=int),
                        'annealing_proba': env_config('ANNEALING_PROBA', default=0, cast=float),
-                       'annealing_topk': env_config('ANNEALING_TOPK', default=None, cast=int),
+                       'annealing_topk': env_config('ANNEALING_TOPK', default=None, cast=lambda x: x if x is None else int(x)),
                        'length_penalty': env_config('LENGTH_PENALTY', default=0.6, cast=float),
 
-                        # embeddings
-                       'constant_pos_embeddings': env_config('CONSTANT_POS_EMBEDDINGS', default=False, cast=bool),
+                       # embeddings
+                       'constant_pos_embedding': env_config('CONSTANT_POS_EMBEDDING', default=False, cast=bool),
                        'sparse_embeddings': env_config('SPARSE_EMBEDDINGS', default=False, cast=bool),
                        'dialog_embeddings': env_config('DIALOG_EMBEDDINGS', default=True, cast=bool),
                        'use_start_end': env_config('USE_START_END', default=False, cast=bool),
 
-                        # model type
-                       'opt_level': env_config('OPT_LEVEL', default=None, cast=str),  # 'O0', 'O1', 'O2', 'O3'
+                       # model type
+                       'model': model,
+                       'opt_level': env_config('OPT_LEVEL', default=None, cast=lambda x: x if x is None else str(x)),  # 'O0', 'O1', 'O2', 'O3'
                        'single_input': env_config('SINGLE_INPUT', default=False, cast=bool),
                        'zero_shot': env_config('ZERO_SHOT', default=False, cast=bool),
                        'shared_attention': env_config('SHARED_ATTENTION', default=True, cast=bool),
@@ -42,23 +52,29 @@ def get_model_config(gpt2=False):
                        'dropout': default_config.dropout,
                        'embed_dropout': default_config.embed_dropout,
                        'attn_dropout': default_config.attn_dropout,
-                       'ff_dropout': default_config.ff_dropout,})
+                       'ff_dropout': default_config.ff_dropout})
 
     return config
 
 
-def get_trainer_config(gpt2=False):
+def get_trainer_config():
+    supported_models = list(MODEL_INFO.keys())
+    if model not in supported_models:
+        raise ValueError(f'Wrong model: expected {supported_models}, got {model}')
+    
     repo = git.Repo(search_parent_directories=True)
-
+    default_config = AttrDict(MODEL_INFO[model]['config'])
     config = AttrDict({# datasets
                        'train_datasets': env_config('TRAIN_DATASETS', default='datasets/ConvAI2/train_self_original.txt', cast=Csv(str)),
+                       'limit_train_size': env_config('LIMIT_TRAIN_SIZE', default=-1, cast=int),
+                       'limit_test_size': env_config('LIMIT_TEST_SIZE', default=-1, cast=int),
                        'test_datasets': env_config('TEST_DATASETS', default='datasets/ConvAI2/valid_self_original.txt', cast=Csv(str)),
                        'persona_augment': env_config('PERSONA_AUGMENT', default=False, cast=bool),
                        'persona_aug_syn_proba': env_config('PERSONA_AUG_SYN_PROBA', default=0.0, cast=float),
 
                        # weights
                        'load_checkpoint': env_config('LOAD_CHECKPOINT', default='', cast=str),
-                       'gpt_parameters_dir': './gpt2_parameters' if gpt2 else './gpt_parameters',
+                       'gpt_weights_path': f'{model}_parameters/model.pt',
 
                        # optimization
                        'n_epochs': env_config('N_EPOCHS', default=20, cast=int),
@@ -88,12 +104,9 @@ def get_trainer_config(gpt2=False):
                        'repo_branch': str(repo.active_branch),
                        
                        # other
-                       'seed': 0,
                        'n_jobs': 4,
                        'device': 'cuda' if torch.cuda.is_available() else 'cpu',
                        'test_period': 1,
-                       'evaluate_full_sequences': env_config('EVALUATE_FULL_SEQUENCES', default=True, cast=bool),
-                       'limit_eval_size': env_config('LIMIT_EVAL_TIME', default=-1, cast=int),
-                       'limit_train_size': env_config('LIMIT_TRAIN_TIME', default=-1, cast=int),})
+                       'evaluate_full_sequences': env_config('EVALUATE_FULL_SEQUENCES', default=True, cast=bool)})
 
     return config
