@@ -15,9 +15,8 @@
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import json
-import re
+import regex as re
 from collections import defaultdict, namedtuple
-from enum import Enum
 
 import ftfy
 import spacy
