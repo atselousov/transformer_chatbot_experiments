@@ -16,9 +16,7 @@
 
 import logging
 import math
-import random
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -39,7 +37,7 @@ class Trainer:
     def __init__(self, model, train_dataset, writer=SummaryWriter(), test_dataset=None, train_batch_size=8, test_batch_size=8,
                  batch_split=1, s2s_weight=1, lm_weight=0.5, risk_weight=0, hits_weight=0, lr=6.25e-5, lr_warmup=2000,
                  n_jobs=0, clip_grad=None, label_smoothing=0, device=torch.device('cuda'), weight_decay=0.1,
-                 ignore_idxs=[], local_rank=-1, apex_level=None, apex_loss_scale=None,
+                 ignore_idxs=[], local_rank=-1, apex_level=None, apex_loss_scale=None, checkpoints_dir=None,
                  linear_schedule=False, n_epochs=0, single_input=False, evaluate_full_sequences=False):
         if local_rank != -1:
             torch.cuda.set_device(local_rank)
@@ -115,6 +113,9 @@ class Trainer:
         self.single_input = single_input
         self.evaluate_full_sequences = evaluate_full_sequences
         self.global_step = 0
+        self.checkpoints_dir = checkpoints_dir
+        if self.checkpoints_dir is not None:
+            self.checkpoints_dir.mkdir(parents=True, exist_ok=True)
 
     def state_dict(self):
         return {'model': self.model.state_dict(),
@@ -183,7 +184,7 @@ class Trainer:
         nexts = targets[:, 1:].contiguous() if targets.dim() == 2 else targets[:, 1:, 0].contiguous()
         if self.hits_weight > 0 and negative_samples > 0:
             # Keep the hidden states for hits@1 loss
-            hidden_state, padding_mask, _ = self.model.transformer_module(targets, enc_contexts)
+            hidden_state, padding_mask, _ = self.model.decoder(targets, enc_contexts)
             outputs = self.model.generate(hidden_state[:, :-1].contiguous())
         else:
             outputs = self.model.decode(targets[:, :-1].contiguous(), enc_contexts)
@@ -400,12 +401,18 @@ class Trainer:
         if hasattr(self, 'test_dataloader'):
             self._eval_test(metric_funcs, external_metrics_func, epoch)
 
-    def train(self, after_epoch_funcs=[], risk_func=None):
-        for epoch in range(self.n_epochs):
-            self._eval_train(epoch, risk_func)
+    def train(self, after_epoch_funcs=[], risk_func=None, save_last=False, save_interrupted=False):
+        try:
+            for epoch in range(self.n_epochs):
+                self._eval_train(epoch, risk_func)
 
-            for func in after_epoch_funcs:
-                func(epoch)
+                if self.checkpoints_dir is not None and save_last:
+                    torch.save(self.model.state_dict(), self.checkpoints_dir / 'last_checkpoint.pt')
 
-        for func in after_epoch_funcs:
-            func(-1)
+                for func in after_epoch_funcs:
+                    func(epoch)
+
+        except (KeyboardInterrupt, Exception, RuntimeError) as e:
+            if save_interrupted:
+                torch.save(self.state_dict(), self.checkpoints_dir / 'interrupted_checkpoint.pt')
+            raise e
