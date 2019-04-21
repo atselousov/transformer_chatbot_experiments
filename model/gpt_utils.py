@@ -46,7 +46,7 @@ MODEL_INFO = {
             'embed_dropout': 0.1,
             'attn_dropout': 0.1,
             'ff_dropout': 0.1,
-            'normalize_before': False
+            'normalize_before': True
         }
     }
 }
