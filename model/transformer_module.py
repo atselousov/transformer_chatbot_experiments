@@ -55,7 +55,7 @@ class ConstantPositionalEmbedding(nn.Module):
     def forward(self, positions):
         batch_size, seq_length = positions.shape
 
-        if seq_length >= self._position_embedding.shape[0]:
+        if seq_length >= self._embedding.shape[0]:
             self._embedding = ConstantPositionalEmbedding.get_embedding(seq_length,
                                                                         self.embedding_dim,
                                                                         self._embedding.device)
