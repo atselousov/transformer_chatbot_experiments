@@ -118,7 +118,7 @@ def _create_datasets(model_config, trainer_config, vocab, logger):
                                     vocab=vocab,
                                     max_lengths=(model_config.n_pos_embeddings - 1) // (3 if model_config.single_input else 1),  # A bit restrictive here
                                     dialog_embeddings=model_config.dialog_embeddings,
-                                    cache='train_cache.bin',
+                                    cache=f'{model_config.model}_train_cache.bin',
                                     use_start_end=model_config.use_start_end,
                                     negative_samples=trainer_config.negative_samples,
                                     augment=trainer_config.persona_augment,
@@ -128,7 +128,7 @@ def _create_datasets(model_config, trainer_config, vocab, logger):
                                    vocab=vocab,
                                    max_lengths=(model_config.n_pos_embeddings - 1) // (3 if model_config.single_input else 1),  # A bit restrictive here
                                    dialog_embeddings=model_config.dialog_embeddings,
-                                   cache='test_cache.bin',
+                                   cache=f'{model_config.model}_test_cache.bin',
                                    use_start_end=model_config.use_start_end,
                                    negative_samples=-1,  # Keep all negative samples
                                    augment=False,
