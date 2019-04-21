@@ -20,7 +20,7 @@ MODEL_INFO = {
         'bpe_codes': 'vocab_40000.bpe',
         'config': {
             'n_layers': 12,
-            'n_embeddings': 40477,
+            'n_embeddings': 40478,
             'n_pos_embeddings': 512,
             'embeddings_size': 768,
             'n_heads': 12,
