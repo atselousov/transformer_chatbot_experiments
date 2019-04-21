@@ -5,7 +5,7 @@ from model.gpt_utils import MODEL_INFO
 from decouple import Csv, config as env_config
 
 
-model = env_config('MODEL', default='gpt2', cast=str)
+model = env_config('MODEL', default='gpt', cast=str)
 
 
 def get_model_config():
@@ -32,13 +32,13 @@ def get_model_config():
                        # embeddings
                        'constant_pos_embedding': env_config('CONSTANT_POS_EMBEDDING', default=False, cast=bool),
                        'sparse_embeddings': env_config('SPARSE_EMBEDDINGS', default=False, cast=bool),
-                       'dialog_embeddings': env_config('DIALOG_EMBEDDINGS', default=True, cast=bool),
+                       'dialog_embeddings': env_config('DIALOG_EMBEDDINGS', default=False, cast=bool),
                        'use_start_end': env_config('USE_START_END', default=False, cast=bool),
 
                        # model type
                        'model': model,
                        'opt_level': env_config('OPT_LEVEL', default=None, cast=lambda x: x if x is None else str(x)),  # 'O0', 'O1', 'O2', 'O3'
-                       'single_input': env_config('SINGLE_INPUT', default=False, cast=bool),
+                       'single_input': env_config('SINGLE_INPUT', default=True, cast=bool),
                        'zero_shot': env_config('ZERO_SHOT', default=False, cast=bool),
                        'shared_attention': env_config('SHARED_ATTENTION', default=True, cast=bool),
                        'successive_attention': env_config('SUCCESSIVE_ATTENTION', default=False, cast=bool),
@@ -52,7 +52,8 @@ def get_model_config():
                        'dropout': default_config.dropout,
                        'embed_dropout': default_config.embed_dropout,
                        'attn_dropout': default_config.attn_dropout,
-                       'ff_dropout': default_config.ff_dropout})
+                       'ff_dropout': default_config.ff_dropout,
+                       'normalize_before': default_config.normalize_before})
 
     return config
 

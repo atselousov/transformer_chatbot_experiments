@@ -75,7 +75,7 @@ class TransformerModel(nn.Module):
                  diversity_coef=0, diversity_groups=1, multiple_choice_head=False,
                  single_input=False, dialog_embeddings=False, constant_pos_embedding=False,
                  shared_enc_dec=True, successive_attention=False, sparse_embeddings=False,
-                 shared_attention=True, context_size=2):
+                 shared_attention=True, normalize_before=False, context_size=2):
 
         super(TransformerModel, self).__init__()
 
@@ -106,6 +106,7 @@ class TransformerModel(nn.Module):
                                          constant_pos_embedding=constant_pos_embedding,
                                          successive_attention=successive_attention,
                                          sparse_embedding=sparse_embeddings,
+                                         normalize_before=normalize_before,
                                          shared_attention=shared_attention,
                                          context_size=context_size)
         self.encoder = self.decoder if shared_enc_dec else copy.deepcopy(self.decoder)

@@ -27,7 +27,8 @@ MODEL_INFO = {
             'dropout': 0.1,
             'embed_dropout': 0.1,
             'attn_dropout': 0.1,
-            'ff_dropout': 0.1
+            'ff_dropout': 0.1,
+            'normalize_before': False
         }
     },
     'gpt2': {
@@ -44,7 +45,8 @@ MODEL_INFO = {
             'dropout': 0.1,
             'embed_dropout': 0.1,
             'attn_dropout': 0.1,
-            'ff_dropout': 0.1
+            'ff_dropout': 0.1,
+            'normalize_before': False
         }
     }
 }

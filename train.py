@@ -75,6 +75,7 @@ def _create_model(model_config, trainer_config, logger):
                              embed_dropout=model_config.embed_dropout,
                              attn_dropout=model_config.attn_dropout,
                              ff_dropout=model_config.ff_dropout,
+                             normalize_before=model_config.normalize_before, 
                              bos_id=vocab.bos_id,
                              eos_id=vocab.eos_id,
                              sent_dialog_id=vocab.sent_dialog_id,
@@ -267,9 +268,9 @@ def main(args, logger):
     after_epoch_funcs = _create_after_epoch_funcs(model_trainer, test_dataset, vocab, trainer_config.test_period, n_samples=0)
     risk_func = _create_risk_metric_func(trainer_config.risk_metric, vocab)
 
-    logger.info("model config: {}".format(model_config))
-    logger.info("trainer config: {}".format(trainer_config))
-    logger.info(f"Logging to {writer.log_dir}")  # Let's save everything on an experiment in the ./runs/XXX/directory
+    #logger.info("model config: {}".format(model_config))
+    #logger.info("trainer config: {}".format(trainer_config))
+    #logger.info(f"Logging to {writer.log_dir}")  # Let's save everything on an experiment in the ./runs/XXX/directory
 
     if args.local_rank in [-1, 0]:
         with open(Path(writer.log_dir) / "model_config.json", "w") as f:

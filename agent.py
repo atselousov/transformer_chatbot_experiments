@@ -84,6 +84,7 @@ class TransformerAgent(Agent):
                                           embed_dropout=model_config.embed_dropout,
                                           attn_dropout=model_config.attn_dropout,
                                           ff_dropout=model_config.ff_dropout,
+                                          normalize_before=model_config.normalize_before,
                                           bos_id=self.vocab.bos_id,
                                           eos_id=self.vocab.eos_id,
                                           sent_dialog_id=self.vocab.sent_dialog_id,
