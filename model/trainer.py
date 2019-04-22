@@ -303,7 +303,6 @@ class Trainer:
                          self.risk_weight * batch_risk_loss / self.batch_split,
                          self.hits_weight * batch_hits_loss / self.batch_split,
                          self.s2s_weight * batch_s2s_loss / self.batch_split)
-            full_loss = tuple(filter(lambda x: x.requires_grad, full_loss))
 
             full_loss = self.optimizer.backward(full_loss)
 

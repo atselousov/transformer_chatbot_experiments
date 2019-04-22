@@ -185,7 +185,8 @@ class NoamOpt:
 
             for loss_id, loss in enumerate(losses):
                 with scale_loss(loss, self.optimizer, loss_id=loss_id) as scaled_loss:
-                    scaled_loss.backward()
+                    if scaled_loss.requires_grad:
+                        scaled_loss.backward()
         else:
             full_loss.backward()
         return full_loss
