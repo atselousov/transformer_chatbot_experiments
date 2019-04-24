@@ -124,11 +124,19 @@ class TransformerModel(nn.Module):
         self.multiple_choice_head = MultipleChoiceHead(self.embeddings_size, dropout) if multiple_choice_head else None
 
     def distribute(self, device):
-        self.transformer_module = nn.parallel.DistributedDataParallel(self.transformer_module.to(device))
+        try:
+            from apex.parallel import DistributedDataParallel, convert_syncbn_model
+        except ImportError:
+            raise ImportError("Please install apex.")
+
+        def _distributed(module):
+            return DistributedDataParallel(convert_syncbn_model(module))
+
+        self.transformer_module = _distributed(self.transformer_module.to(device))
         if hasattr(self, 'encoder_module'):
-            self.encoder_module = nn.parallel.DistributedDataParallel(self.encoder_module.to(device))
-        self.pre_softmax = nn.parallel.DistributedDataParallel(self.pre_softmax.to(device))
-        self.multiple_choice_head = nn.parallel.DistributedDataParallel(self.multiple_choice_head.to(device)) \
+            self.encoder_module = _distributed(self.encoder_module.to(device))
+        self.pre_softmax = _distributed(self.pre_softmax.to(device))
+        self.multiple_choice_head = _distributed(self.multiple_choice_head.to(device)) \
             if self.multiple_choice_head is not None else None
 
     def state_dict(self):
@@ -212,7 +220,7 @@ class TransformerModel(nn.Module):
                 for v in context:
                     size_ = v.size()
                     tile_size = size_[-2] * size_[-1]
-                    new_v = v.view(-1, self.beam_size, tile_size)
+                    new_v = v.contiguous().view(-1, self.beam_size, tile_size)
                     new_v = new_v.gather(1, beam_idxs.unsqueeze(-1).repeat([1, 1, tile_size]))
                     v[...] = new_v.view(*size_)
         return past

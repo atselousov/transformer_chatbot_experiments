@@ -59,7 +59,7 @@ class Trainer:
             ]
 
         base_optimizer = Adam(optimizer_grouped_parameters, lr=lr)
-        assert local_rank == -1 or apex_level is None, 'Distributed apex is not supported right now.'
+        assert local_rank == -1 or apex_level is None, 'Distributed model with apex optimization is not supported right now.'
         self.model, base_optimizer = apex_model(self.model, optimizer=base_optimizer,
                                                 apex_level=apex_level, apex_loss_scale=apex_loss_scale)
 
