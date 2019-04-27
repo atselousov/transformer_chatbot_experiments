@@ -105,7 +105,9 @@ class TransformerAgent(Agent):
                                           share_models=model_config.share_models,
                                           successive_attention=model_config.successive_attention,
                                           sparse_embeddings=model_config.sparse_embeddings,
-                                          shared_attention=model_config.sparse_embeddings
+                                          shared_attention=model_config.sparse_embeddings,
+                                          bs_temperature=model_config.bs_temperature,
+                                          bs_nucleus_p=model_config.bs_nucleus_p
                                           )
 
             state_dict = torch.load(model_config.checkpoint_path, map_location=lambda storage, loc: storage)

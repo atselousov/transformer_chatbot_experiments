@@ -45,7 +45,9 @@ def get_model_config():
                        'dialog_embeddings': env_config('DIALOG_EMBEDDINGS', default=True, cast=bool),
                        'single_input': env_config('SINGLE_INPUT', default=False, cast=bool),
                        'use_start_end': env_config('USE_START_END', default=False, cast=bool),
-                       'apex_level': env_config('APEX_LEVEL', default=None, cast=cast2(str)),  # 'O0', 'O1', 'O2', 'O3'
+                       'apex_level': env_config('APEX_LEVEL', default=None, cast=cast2(str)),  # 'O0', 'O1', 'O2', 'O3',
+                       'bs_temperature': env_config('BS_TEMPERATURE', default=1, cast=float),
+                       'bs_nucleus_p': env_config('BS_NUCLEUS_P', default=0, cast=float)
                        })
 
     return config
