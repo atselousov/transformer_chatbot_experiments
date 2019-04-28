@@ -185,7 +185,7 @@ def load_gpt_weights(gpt_model, state, n_special_tokens=0):
         gpt_model.embedding.pos_embedding.weight.data[1:] = state['pos_embedding']
 
     state['tok_embedding'] = state['tok_embedding'][:gpt_model.embedding.tok_embedding.num_embeddings - n_special_tokens]
-    gpt_model.embedding.tok_embedding.weight.data[:n_special_tokens] = 0
+    gpt_model.embedding.tok_embedding.weight.data[:n_special_tokens] = state['tok_embedding'].mean(dim=0)
     gpt_model.embedding.tok_embedding.weight.data[n_special_tokens:] = state['tok_embedding']
 
     gpt_model.load_state_dict(state['transformer_state'], strict=False)
