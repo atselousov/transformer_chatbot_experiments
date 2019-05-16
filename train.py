@@ -60,9 +60,11 @@ def _create_model(model_config, trainer_config, logger):
         logger.info('Downloading bpe codes')
         prepare_bpe_codes(codes_path, model=model_config.model)
 
+    model_type = 'gpt2' if model_config.model.startswith('gpt2') else 'gpt'
+
     vocab = get_vocab(vocab_path=vocab_path,
                       codes_path=codes_path,
-                      tokenizer_type=model_config.model,
+                      tokenizer_type=model_type,
                       zero_shot_special_tokens=model_config.zero_shot)
 
     model = TransformerModel(n_layers=model_config.n_layers,
@@ -114,11 +116,13 @@ def _create_model(model_config, trainer_config, logger):
 def _create_datasets(model_config, trainer_config, vocab, logger):
     logger.info('Loading datasets')
 
+    model_type = 'gpt2' if model_config.model.startswith('gpt2') else 'gpt'
+
     train_dataset = FacebookDataset(paths=trainer_config.train_datasets,
                                     vocab=vocab,
                                     max_lengths=(model_config.n_pos_embeddings - 1) // (3 if model_config.single_input else 1),  # A bit restrictive here
                                     dialog_embeddings=model_config.dialog_embeddings,
-                                    cache=f'{model_config.model}_train_cache.bin',
+                                    cache=f'{model_type}_train_cache.bin',
                                     use_start_end=model_config.use_start_end,
                                     negative_samples=trainer_config.negative_samples,
                                     augment=trainer_config.persona_augment,
@@ -128,7 +132,7 @@ def _create_datasets(model_config, trainer_config, vocab, logger):
                                    vocab=vocab,
                                    max_lengths=(model_config.n_pos_embeddings - 1) // (3 if model_config.single_input else 1),  # A bit restrictive here
                                    dialog_embeddings=model_config.dialog_embeddings,
-                                   cache=f'{model_config.model}_test_cache.bin',
+                                   cache=f'{model_type}_test_cache.bin',
                                    use_start_end=model_config.use_start_end,
                                    negative_samples=-1,  # Keep all negative samples
                                    augment=False,
