@@ -123,6 +123,42 @@ class TransformerModel(nn.Module):
         self.pre_softmax.weight = self.transformer_module.embeddings.weight
         self.multiple_choice_head = MultipleChoiceHead(self.embeddings_size, dropout) if multiple_choice_head else None
 
+    def distribute(self, device):
+        try:
+            from apex.parallel import DistributedDataParallel, convert_syncbn_model
+        except ImportError:
+            raise ImportError("Please install apex.")
+
+        def _distributed(module):
+            return DistributedDataParallel(convert_syncbn_model(module))
+
+        self.transformer_module = _distributed(self.transformer_module.to(device))
+        if hasattr(self, 'encoder_module'):
+            self.encoder_module = _distributed(self.encoder_module.to(device))
+        self.pre_softmax = _distributed(self.pre_softmax.to(device))
+        self.multiple_choice_head = _distributed(self.multiple_choice_head.to(device)) \
+            if self.multiple_choice_head is not None else None
+
+    def state_dict(self):
+        state_dict = {}
+        for k in dir(self):
+            module = getattr(self, k)
+            if isinstance(module, nn.Module):
+                if isinstance(module, nn.parallel.DistributedDataParallel):
+                    module = module.module
+
+                state_dict[k] = module.state_dict()
+
+        return state_dict
+
+    def load_state_dict(self, state_dict, strict=True):
+        for k, v in state_dict.items():
+            assert hasattr(self, k), f'Model does not have {k} submodule'
+            module = getattr(self, k)
+            if isinstance(module, nn.parallel.DistributedDataParallel):
+                module = module.module
+            module.load_state_dict(v, strict)
+
     def forward(self, x, contexts=[]):
         enc_contexts = [self.encode(c) for c in contexts]
         return self.decode(x, enc_contexts)
@@ -184,7 +220,7 @@ class TransformerModel(nn.Module):
                 for v in context:
                     size_ = v.size()
                     tile_size = size_[-2] * size_[-1]
-                    new_v = v.view(-1, self.beam_size, tile_size)
+                    new_v = v.contiguous().view(-1, self.beam_size, tile_size)
                     new_v = new_v.gather(1, beam_idxs.unsqueeze(-1).repeat([1, 1, tile_size]))
                     v[...] = new_v.view(*size_)
         return past
