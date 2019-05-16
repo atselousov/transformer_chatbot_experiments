@@ -103,6 +103,8 @@ def main():
                                    successive_attention=model_config.successive_attention,
                                    sparse_embeddings=model_config.sparse_embeddings,
                                    shared_attention=model_config.shared_attention,
+                                   bs_temperature=model_config.bs_temperature,
+                                   bs_nucleus_p=model_config.bs_nucleus_p,
                                    vocab=None)  # for beam search debugging
 
     if not trainer_config.load_last:

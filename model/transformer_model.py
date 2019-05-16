@@ -74,7 +74,7 @@ class TransformerModel(nn.Module):
                  diversity_coef=0, diversity_groups=1, n_segments=None, multiple_choice_head=False,
                  single_input=False, dialog_embeddings=False, vocab=None, constant_embedding=False,
                  share_models=True, successive_attention=False, sparse_embeddings=False,
-                 shared_attention=True, context_size=2):
+                 shared_attention=True, context_size=2, bs_temperature=1, bs_nucleus_p=0):
 
         super(TransformerModel, self).__init__()
 
@@ -100,6 +100,9 @@ class TransformerModel(nn.Module):
         self.single_input = single_input
         self.dialog_embeddings = dialog_embeddings
         self.share_models = share_models
+
+        self.bs_temperature = bs_temperature
+        self.bs_nucleus_p = bs_nucleus_p
 
         self.vocab = vocab
 
@@ -198,6 +201,32 @@ class TransformerModel(nn.Module):
         """https://arxiv.org/abs/1609.08144"""
         return (5 + sequence_lengths) ** self.length_penalty_coef / (5 + 1) ** self.length_penalty_coef
 
+    def _get_proba_with_temperature(self, logits):
+        if self.bs_temperature != 1:
+            logits /= self.bs_temperature
+
+        return F.softmax(logits, dim=-1)
+
+    def _get_beam_scores(self, probas, beam_scores, is_end):
+        skip_mask = None
+
+        if self.bs_nucleus_p > 0:
+            assert self.annealing_topk is None
+
+            sorted_probas, idxs = torch.sort(probas, descending=True, dim=-1)
+            skip_mask = torch.cumsum(sorted_probas.cumsum(dim=-1) > self.bs_nucleus_p, dim=-1) > 1
+            sorted_probas.masked_fill_(skip_mask, 0.0)
+            _, idxs = torch.sort(idxs, dim=-1)
+            probas = torch.gather(sorted_probas, -1, idxs)
+            skip_mask = torch.gather(skip_mask, -1, idxs)
+
+        beam_scores = beam_scores.unsqueeze(-1) + torch.log(probas) * (1 - is_end.float().unsqueeze(-1))
+
+        if skip_mask is not None:
+            beam_scores.masked_fill_(skip_mask, float('-inf'))
+
+        return beam_scores
+
     def _sample(self, beam_scores, num_samples, sample_prob=1.):
         if random.random() < sample_prob:
             beam_probas = F.softmax(beam_scores, dim=-1)
@@ -207,7 +236,6 @@ class TransformerModel(nn.Module):
                 idxs = torch.gather(sample_idxs, 1, idxs)
             else:
                 idxs = torch.multinomial(beam_probas, num_samples)
-
             scores = torch.gather(beam_scores, 1, idxs)
         else:
             scores, idxs = beam_scores.topk(num_samples, dim=-1)
@@ -261,9 +289,11 @@ class TransformerModel(nn.Module):
                 outputs, _, past = self.transformer_module(inputs, beam_enc_contexts, past=past)
 
                 logits = self.generate(outputs[:, -1, :])
-                log_probs = F.log_softmax(logits.float(), dim=-1)
-                log_probs = log_probs.view(batch_size, self.beam_size, -1)
-                beam_scores = beam_scores.unsqueeze(-1) + log_probs * (1 - is_end.float().unsqueeze(-1))
+
+                probs = self._get_proba_with_temperature(logits.float())
+                probs = probs.view(batch_size, self.beam_size, -1)
+
+                beam_scores = self._get_beam_scores(probs, beam_scores, is_end)
                 penalty = self._length_penalty(beam_lens.float() + 1 - is_end.float()).unsqueeze(-1)
                 beam_scores = beam_scores / penalty
 
@@ -301,7 +331,7 @@ class TransformerModel(nn.Module):
 
                     beam_idxs = (idxs.float() / self.n_embeddings).long()
 
-                sym_idxs = torch.fmod(idxs, log_probs.shape[-1])
+                sym_idxs = torch.fmod(idxs, probs.shape[-1])
                 is_end = torch.gather(is_end, 1, beam_idxs)
                 beam_lens = torch.gather(beam_lens, 1, beam_idxs)
 
