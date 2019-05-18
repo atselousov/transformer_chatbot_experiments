@@ -20,6 +20,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 
 
 try:
@@ -145,10 +146,10 @@ class MultiheadAttention(nn.Module):
 
         return x
 
-    def _attn(self, q, k, v, apply_future_mask=True, padding_mask=None):
+    def _attn(self, q, k, v, apply_future_mask, padding_mask):
         w = torch.matmul(q, k) / math.sqrt(self.n_features // self.n_heads)
 
-        if apply_future_mask:
+        if apply_future_mask.item():
             future_mask = MultiheadAttention._get_future_mask(w.shape[-2:], w.device).unsqueeze(0).unsqueeze(0)
             w.masked_fill_(future_mask, float('-inf'))
 
@@ -182,7 +183,7 @@ class MultiheadAttention(nn.Module):
                 key = torch.cat((past_key, key), dim=-2)
                 value = torch.cat((past_value, value), dim=-2)
 
-            apply_future_mask = self.future_mask  # self-attention
+            apply_future_mask = torch.tensor(self.future_mask)  # self-attention
 
         elif kv_same:
             if past_query is not None:  # we have already computed this query
@@ -197,7 +198,7 @@ class MultiheadAttention(nn.Module):
                 kv_w, kv_b = self.qkv_proj.weight[self.n_features:, :], self.qkv_proj.bias[self.n_features:]
                 key, value = F.linear(key, kv_w, kv_b).split(self.n_features, dim=-1)
 
-            apply_future_mask = False
+            apply_future_mask = torch.tensor(False)
         else:
             assert False
 
@@ -208,7 +209,7 @@ class MultiheadAttention(nn.Module):
         key = self._split_heads(key, is_key=True)
         value = self._split_heads(value)
 
-        x = self._attn(query, key, value, apply_future_mask, padding_mask)
+        x = checkpoint(self._attn, query, key, value, apply_future_mask, padding_mask)
         x = self._merge_heads(x)
 
         x = self.out_proj(x)
